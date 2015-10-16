@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+# Fork by Martin Falatic
+
 # Original Python 2 version by user /u/chknoodle_aggie 2015-08-14 as posted in
 # https://www.reddit.com/r/Python/comments/3gwzjr/using_pyephem_i_just_plotted_every_tleinfo/
 
@@ -8,20 +10,18 @@ from __future__ import print_function   # PEP 3105: Make print a function
 import math
 import time
 from datetime import datetime
+import sys
+import os.path
 import ephem
 import numpy as np
 import matplotlib.pyplot as plt
-import sys
-import os.path
 import zipfile
-import webbrowser
-degree_sign = '\N{DEGREE SIGN}'
+import geocoder
 
 try:
-    from urllib.request import urlopen, URLopener
+    from urllib.request import URLopener
 except ImportError:
     from urllib import URLopener
-    from urllib2 import urlopen
 
 try:
     input = raw_input
@@ -29,26 +29,24 @@ except NameError:
     pass
 
 # http://www.celestrak.com/NORAD/elements/
-
 # import tle data from NORAD if internet_on(), save as sat=ephem.readtle(.
 
+updateTLE = False
 
-def internet_on():
-    try:
-        # tries to contact Google
-        response = urlopen('http://google.com', timeout=1)
-        return True
-    except:
-        pass
-    return False
-
-if internet_on():
+if updateTLE:
+    print('Retrieving TLE data...')
     file = URLopener()
-    file.retrieve('http://www.tle.info/data/ALL_TLE.ZIP', 'ALL_TLE.ZIP')
-    print('ALL_TLE.ZIP updated.')
+    try:
+        file.retrieve('http://www.tle.info/data/ALL_TLE.ZIP', 'ALL_TLE.ZIP')
+    except:
+        print("Error: Failed to get TLE data")
+        sys.exit(1)
+    else:
+        print('ALL_TLE.ZIP updated')
 else:
-    print('Connection unavailable. Using saved ALL_TLE.ZIP (' +
+    print('Using saved ALL_TLE.ZIP (' +
           time.ctime(os.path.getmtime('ALL_TLE.ZIP')) + ')')
+
 content = []
 
 print('Unzipping ALL_TLE.ZIP...')
@@ -59,71 +57,48 @@ print('Done unzipping')
 # load TLE data into python array
 with open('ALL_TLE.TXT') as f:
     content = f.readlines()
-    print(int(len(content) / 3), 'TLEs loaded from ALL_TLE.TXT.')
+    print(int(len(content) / 3), 'TLEs loaded from ALL_TLE.TXT')
     for i in range(0, len(content)):
         content[i] = content[i].replace('\n', '')  # remove endlines
 
+# from geopy.geocoders import GoogleV3  # Nominatim
+# geolocator = GoogleV3()  # Nominatim()
+# location = geolocator.geocode(locationKeyword)
+# print(repr(location.address).encode(sys.stdout.encoding, errors='replace'))
+# print((location.latitude, location.longitude, location.altitude))
+# print(repr(location.raw).encode(sys.stdout.encoding, errors='replace'))
+
 # Set observer location
+defaultLocation = "Abilene, TX"
+locationKeyword = ''
+while not locationKeyword:
+    locationKeyword = input('Location keyword: ')
+    if not locationKeyword or locationKeyword.isspace():
+        locationKeyword = defaultLocation
+        print("Using default location {}".format(locationKeyword))
+
+    g = geocoder.google(locationKeyword)
+    if g.status != 'OK':
+        print('Location "{}" not found'.format(locationKeyword))
+        locationKeyword = ''
+
+print(g.json)
 home = ephem.Observer()
-# type first few letters of the location keywords included in the entries below
-locationKeyword = input('Location keyword: ')
-locationName = ''
+(latitude, longitude) = g.latlng
+elevation = geocoder.elevation(g.latlng).meters
 
-# #--Observer() in Abilene, TX---------------
-if (locationKeyword.lower() ==
-        'abilene'[0:len(locationKeyword)].lower()):
-    locationName = 'Abilene, TX'
-    print('Observer in Abilene, TX.')
-    home = ephem.Observer()
-    home.lon = '-99.74'   # +E
-    home.lat = '32.45'      # +N
-    home.elevation = 524.0  # meters
-    # home.temp = 38.0 #deg Celcius
-    # home.pressure = 1016.0 #mbar
-# #---------------------------------
+home.lat = str(latitude)    # +N
+home.lon = str(longitude)   # +E
+home.elevation = elevation  # 524.0  # meters
 
-# #--Observer() in College Station, TX---------------
-elif (locationKeyword.lower() ==
-        'college station'[0:len(locationKeyword)].lower()):
-    locationName = 'College Station, TX'
-    print('Observer in College Station, TX.')
-    home = ephem.Observer()
-    home.lon = '-96.314444'   # +E
-    home.lat = '30.601389'     # +N
-    home.elevation = 103.0  # meters
-    # home.temp = 26.0 #deg Celcius
-    # home.pressure = 0.0 #mbar
-# #---------------------------------
+# Abilene, TX
+# home.lat = '32.45'      # +N
+# home.lon = '-99.74'     # +E
+# home.elevation = 524.0  # meters
 
-# #--Observer() in Oxford, England---------------
-elif (locationKeyword.lower() ==
-        'oxford'[0:len(locationKeyword)].lower()):
-    locationName = 'Oxford, England'
-    print('Observer in Oxford, England.')
-    home = ephem.Observer()
-    home.lon = '-1.2578'   # +E
-    home.lat = '51.7519'     # +N
-    home.elevation = 72.0  # meters
-    # home.temp = 26.0 #deg Celcius
-    # home.pressure = 0.0 #mbar
-# #---------------------------------
+print('{}N {}E, {}m'.
+      format((home.lat), (home.lon), home.elevation))
 
-# #--Observer() in Bristol, RI---------------
-elif (locationKeyword.lower() ==
-        'bristol'[0:len(locationKeyword)].lower()):
-    locationName = 'Bristol, RI'
-    print('Observer in Bristol, RI.')
-    home = ephem.Observer()
-    home.lon = '-71.2686'   # +E
-    home.lat = '41.6842'     # +N
-    home.elevation = 40.0  # meters
-    # home.temp = 26.0 #deg Celcius
-    # home.pressure = 0.0 #mbar
-# #---------------------------------
-
-else:
-    print('Location keyword not found.')
-    sys.exit()
 
 # read in each tle entry and save to list
 savedsats = []
@@ -139,7 +114,7 @@ while 3 * i_name + 2 <= len(content):
 fig = plt.figure()
 
 t = time.time()
-print(t)
+
 while 1:
     fig.clf()
     home.date = datetime.utcnow()

@@ -32,7 +32,7 @@ from __future__ import print_function   # PEP 3105: Make print a function
 
 import math
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import sys
 import os.path
 import ephem
@@ -53,6 +53,7 @@ except NameError:
 
 TITLE = "Python Satellite Data Visualizer"
 DEBUG = True
+SIMSECS = 0  # 60*60*24*7
 
 tleSources = [
     {'name':  'McCant\'s classifieds',
@@ -202,9 +203,13 @@ if __name__ == "__main__":
 
     fig = plt.figure()
     t = time.time()
+    newdate = datetime.utcnow()
     while 1:
-        fig.clf()
-        home.date = datetime.utcnow()
+        if SIMSECS > 0:
+            newdate += timedelta(seconds=SIMSECS)
+        else:
+            newdate = datetime.utcnow()
+        home.date = newdate
 
         theta_plot = []
         r_plot = []
@@ -239,13 +244,17 @@ if __name__ == "__main__":
         for satdata in savedsats:  # for each satellite in the savedsats list
             try:
                 satdata['body'].compute(home)
+                alt = satdata['body'].alt
             except ValueError:
                 pass  # print("Date out of range")
-            if math.degrees(satdata['body'].alt) > 0.0:
-                theta_plot.append(satdata['body'].az)
-                r_plot.append(math.cos(satdata['body'].alt))
-                colors.append(satdata['color'])
-                i += 1
+            except RuntimeError:
+                print("Cannot compute position for {}".format(satdata['name']))
+            else:
+                if math.degrees(alt) > 0.0:
+                    theta_plot.append(satdata['body'].az)
+                    r_plot.append(math.cos(satdata['body'].alt))
+                    colors.append(satdata['color'])
+                    i += 1
 
         # plot initialization and display
         ax = plt.subplot(111, polar=True)
@@ -259,4 +268,5 @@ if __name__ == "__main__":
         fig.canvas.mpl_connect('pick_event', onpick)
         fig.canvas.mpl_connect('close_event', handle_close)
         ax.set_rmax(1.0)
-        plt.pause(0.20)
+        plt.pause(0.25)  # A pause is needed here, but the loop is rather slow
+        fig.clf()

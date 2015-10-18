@@ -1,17 +1,31 @@
 #!/usr/bin/env python
 
+#   Copyright (c) 2015 Martin F. Falatic
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+
 """
 Python Satellite Data Visualizer
 --------------------------------
 
 Author: Martin Falatic, 2015-10-15
+Based on code by user /u/chknoodle_aggie 2015-08-14 as posted in
+https://www.reddit.com/r/Python/comments/3gwzjr/using_pyephem_i_just_plotted_every_tleinfo/
 
 More about TLE:
 https://en.wikipedia.org/wiki/Two-line_element_set
 http://spaceflight.nasa.gov/realdata/sightings/SSapplications/Post/JavaSSOP/SSOP_Help/tle_def.html
 
-Based on code by user /u/chknoodle_aggie 2015-08-14 as posted in
-https://www.reddit.com/r/Python/comments/3gwzjr/using_pyephem_i_just_plotted_every_tleinfo/
 """
 
 from __future__ import print_function   # PEP 3105: Make print a function
@@ -37,6 +51,7 @@ try:
 except NameError:
     pass
 
+TITLE = "Python Satellite Data Visualizer"
 DEBUG = True
 
 tleSources = [
@@ -63,6 +78,7 @@ tleSources = [
 
 
 def readTLEfile(source):
+    ''' Read a TLE file (unzip if necessary) '''
     sourceName = source['name']
     sourceUrl = source['url']
     sourceFile = source['file']
@@ -137,8 +153,9 @@ def processTLEdata(tleSources):
 
 
 def getLocation():
+    ''' Get user location based on input '''
     defaultLocation = "Abilene, TX"
-    # Pontianak, Indonesia and Quito, Ecuador are right on the equator
+    # Note: Pontianak, Indonesia and Quito, Ecuador are right on the equator
     locationKeyword = ''
     while not locationKeyword:
         locationKeyword = input(
@@ -161,7 +178,7 @@ def getLocation():
 if __name__ == "__main__":
     print()
     print('-'*79)
-    print("Python Satellite Data Visualizer")
+    print(TITLE)
     print('-'*79)
     print()
 

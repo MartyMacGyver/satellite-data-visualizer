@@ -1,4 +1,4 @@
-# Satellite Data Visualizer
+# Satellite Data Visualizer for Python
 
 A Python 2.7+/3.4+ tool for visualizing satellite positions from using TLE (two-line element set) formatted data using matplotlib
 

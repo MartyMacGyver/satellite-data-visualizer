@@ -15,8 +15,8 @@
 #   limitations under the License.
 
 """
-Python Satellite Data Visualizer
---------------------------------
+Satellite Data Visualizer for Python
+------------------------------------
 
 Author: Martin Falatic, 2015-10-15
 Based on code by user /u/chknoodle_aggie 2015-08-14 as posted in
@@ -51,8 +51,8 @@ try:
 except NameError:
     pass
 
-TITLE = "Python Satellite Data Visualizer"
-DEBUG = True
+TITLE = "Satellite Data Visualizer for Python"
+DEBUG = False
 SIMSECS = 0  # 60*60
 
 tleSources = [
@@ -181,23 +181,12 @@ def getLocation():
     return g
 
 
-if __name__ == "__main__":
-    print()
-    print('-'*79)
-    print(TITLE)
-    print('-'*79)
-    print()
-
-    savedsats = processTLEdata(tleSources)
-    g = getLocation()
-    print()
-    (latitude, longitude) = g.latlng
-    elevation = geocoder.elevation(g.latlng).meters
-
+def plotSats(savedsats, latitude, longitude, elevation):
     home = ephem.Observer()
     home.lat = str(latitude)    # +N
     home.lon = str(longitude)   # +E
     home.elevation = elevation  # meters
+
     if DEBUG:
         print('{}N {}E, {}m'.format(latitude, longitude, elevation))
         print('{}N {}E, {}m'.format(home.lat, home.lon, home.elevation))
@@ -207,6 +196,8 @@ if __name__ == "__main__":
     print()
 
     fig = plt.figure()
+    fig.canvas.set_window_title(TITLE)
+
     t = time.time()
     currdate = datetime.utcnow()
     while 1:
@@ -259,14 +250,28 @@ if __name__ == "__main__":
         pltTitle = str(home.date)
         ax = plt.subplot(111, polar=True)
         ax.set_title(pltTitle, va='bottom')
-        ax.set_theta_direction(-1)  # clockwise
         ax.set_theta_offset(np.pi / 2.0)  # Top = 0 deg = north
+        ax.set_theta_direction(-1)  # clockwise
+        ax.xaxis.set_ticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
         ax.yaxis.set_ticklabels([])  # hide radial tick labels
         ax.grid(True)
         ax.scatter(theta_plot, r_plot, c=colors, alpha=0.5, picker=True)
         ax.set_rmax(1.0)
-        ax.set_xticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
         fig.canvas.mpl_connect('pick_event', onpick)
         fig.canvas.mpl_connect('close_event', handle_close)
         plt.pause(0.25)  # A pause is needed here, but the loop is rather slow
         fig.clf()
+
+
+if __name__ == "__main__":
+    print()
+    print('-'*79)
+    print(TITLE)
+    print('-'*79)
+    print()
+    savedsats = processTLEdata(tleSources)
+    g = getLocation()
+    (latitude, longitude) = g.latlng
+    elevation = geocoder.elevation(g.latlng).meters
+    plotSats(savedsats=savedsats, latitude=latitude,
+             longitude=longitude, elevation=elevation)

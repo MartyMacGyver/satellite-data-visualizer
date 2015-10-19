@@ -53,7 +53,7 @@ except NameError:
 
 TITLE = "Python Satellite Data Visualizer"
 DEBUG = True
-SIMSECS = 0  # 60*60*24*7
+SIMSECS = 0  # 60*60
 
 tleSources = [
     {'name':  'McCant\'s classifieds',
@@ -66,15 +66,20 @@ tleSources = [
      'file':  'ALL_TLE.ZIP',
      'color': '#ffffff'},
 
+    {'name':  'AUS-CITY GPS',
+     'url':   'http://www.tle.info/data/gps-ops.txt',
+     'file':  'gps-ops.txt',
+     'color': '#ff0000'},
+
     {'name':  'Celestrak visual',
      'url':   'http://www.celestrak.com/NORAD/elements/visual.txt',
      'file':  'visual.txt',
      'color': '#00ff00'},
 
-    {'name':  'Celestrak BREEZE-M R/B',
-     'url':   'http://www.celestrak.com/NORAD/elements/2012-044.txt',
-     'file':  '2012-044.txt',
-     'color': '#ff0000'},
+    # {'name':  'Celestrak BREEZE-M R/B',
+    #  'url':   'http://www.celestrak.com/NORAD/elements/2012-044.txt',
+    #  'file':  '2012-044.txt',
+    #  'color': '#0000ff'},
     ]
 
 
@@ -108,7 +113,7 @@ def readTLEfile(source):
         tempContent = f.readlines()
         for i in range(0, len(tempContent)):
             tempContent[i] = tempContent[i].replace('\n', '')
-        print(int(len(tempContent) / 3),
+        print(len(tempContent) // 3,
               'TLEs loaded from {}'.format(sourceFile))
 
     return tempContent
@@ -155,7 +160,7 @@ def processTLEdata(tleSources):
 
 def getLocation():
     ''' Get user location based on input '''
-    defaultLocation = "Abilene, TX"
+    defaultLocation = "San Francisco, CA"
     # Note: Pontianak, Indonesia and Quito, Ecuador are right on the equator
     locationKeyword = ''
     while not locationKeyword:
@@ -203,14 +208,13 @@ if __name__ == "__main__":
 
     fig = plt.figure()
     t = time.time()
-    newdate = datetime.utcnow()
+    currdate = datetime.utcnow()
     while 1:
         if SIMSECS > 0:
-            newdate += timedelta(seconds=SIMSECS)
+            currdate += timedelta(seconds=SIMSECS)
         else:
-            newdate = datetime.utcnow()
-        home.date = newdate
-
+            currdate = datetime.utcnow()
+        home.date = currdate
         theta_plot = []
         r_plot = []
         colors = []
@@ -229,18 +233,14 @@ if __name__ == "__main__":
             ind = event.ind
             r = np.take(r_plot, ind)[0]
             theta = np.take(theta_plot, ind)[0]
-            i = 0
-            while i < len(savedsats):
-                satdata = savedsats[i]
+            for satdata in savedsats:
                 if (math.degrees(theta) == math.degrees(satdata['body'].az) and
                         math.cos(satdata['body'].alt) == r):
                     break
-                i += 1
             print('name=' + satdata['body'].name,
                   'az=' + str(math.degrees(satdata['body'].az)),
                   'alt=' + str(math.degrees(satdata['body'].alt)))
 
-        i = 0
         for satdata in savedsats:  # for each satellite in the savedsats list
             try:
                 satdata['body'].compute(home)
@@ -254,19 +254,19 @@ if __name__ == "__main__":
                     theta_plot.append(satdata['body'].az)
                     r_plot.append(math.cos(satdata['body'].alt))
                     colors.append(satdata['color'])
-                    i += 1
 
         # plot initialization and display
+        pltTitle = str(home.date)
         ax = plt.subplot(111, polar=True)
+        ax.set_title(pltTitle, va='bottom')
         ax.set_theta_direction(-1)  # clockwise
-        ax.set_theta_offset(np.pi / 2)  # put 0 degrees (north) at top of plot
+        ax.set_theta_offset(np.pi / 2.0)  # Top = 0 deg = north
         ax.yaxis.set_ticklabels([])  # hide radial tick labels
         ax.grid(True)
-        title = str(home.date)
-        ax.set_title(title, va='bottom')
         ax.scatter(theta_plot, r_plot, c=colors, alpha=0.5, picker=True)
+        ax.set_rmax(1.0)
+        ax.set_xticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
         fig.canvas.mpl_connect('pick_event', onpick)
         fig.canvas.mpl_connect('close_event', handle_close)
-        ax.set_rmax(1.0)
         plt.pause(0.25)  # A pause is needed here, but the loop is rather slow
         fig.clf()

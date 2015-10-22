@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 
 #   Copyright (c) 2015 Martin F. Falatic
 #
@@ -54,6 +54,7 @@ except NameError:
 TITLE = "Satellite Data Visualizer for Python"
 DEBUG = False
 SIMSECS = 0  # 60*60
+t = time.time()
 
 tleSources = [
     {'name':  'McCant\'s classifieds',
@@ -109,10 +110,10 @@ def readTLEfile(source):
         sourceFile = zip.namelist()[0]
         print('Extracted {}'.format(zip.namelist()))
 
+    tempContent = []
     with open(sourceFile) as f:
-        tempContent = f.readlines()
-        for i in range(0, len(tempContent)):
-            tempContent[i] = tempContent[i].replace('\n', '')
+        for aline in f:
+            tempContent.append(aline.replace('\n', ''))
         print(len(tempContent) // 3,
               'TLEs loaded from {}'.format(sourceFile))
 
@@ -198,8 +199,11 @@ def plotSats(savedsats, latitude, longitude, elevation):
     fig = plt.figure()
     fig.canvas.set_window_title(TITLE)
 
+    global t
     t = time.time()
     currdate = datetime.utcnow()
+    errored_sats = set()
+
     while 1:
         if SIMSECS > 0:
             currdate += timedelta(seconds=SIMSECS)
@@ -239,7 +243,9 @@ def plotSats(savedsats, latitude, longitude, elevation):
             except ValueError:
                 pass  # print("Date out of range")
             except RuntimeError:
-                print("Cannot compute position for {}".format(satdata['name']))
+                if satdata['name'] not in errored_sats:
+                    errored_sats.add(satdata['name'])
+                    print("Cannot compute position for {}".format(satdata['name']))
             else:
                 if math.degrees(alt) > 0.0:
                     theta_plot.append(satdata['body'].az)

@@ -77,6 +77,11 @@ tleSources = [
      'file':  'visual.txt',
      'color': '#00ff00'},
 
+    {'name':  'Planet Labs',
+     'url':   'http://ephemerides.planet-labs.com/planet_mc.tle',
+     'file':  'planet_mc.tle',
+     'color': '#00ffff'},
+
     # {'name':  'Celestrak BREEZE-M R/B',
     #  'url':   'http://www.celestrak.com/NORAD/elements/2012-044.txt',
     #  'file':  '2012-044.txt',

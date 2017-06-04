@@ -1,6 +1,6 @@
-#!/usr/bin/env python2.7
+#!/usr/bin/env python3.6
 
-#   Copyright (c) 2015 Martin F. Falatic
+#   Copyright (c) 2015-2017 Martin F. Falatic
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -42,9 +42,9 @@ import zipfile
 import geocoder
 
 try:
-    from urllib.request import URLopener
+    from urllib.request import urlopen, Request
 except ImportError:
-    from urllib import URLopener
+    from urllib2 import urlopen, Request
 
 try:
     input = raw_input
@@ -55,6 +55,11 @@ TITLE = "Satellite Data Visualizer for Python"
 DEBUG = False
 SIMSECS = 0  # 60*60
 t = time.time()
+
+user_agent = 'Mozilla/5.0'
+
+color_outline = '#808080'
+color_alpha = 0.75
 
 tleSources = [
     {'name':  'McCant\'s classifieds',
@@ -91,36 +96,40 @@ tleSources = [
 
 def readTLEfile(source):
     ''' Read a TLE file (unzip if necessary) '''
-    sourceName = source['name']
-    sourceUrl = source['url']
-    sourceFile = source['file']
-    if os.path.isfile(sourceFile):
-        print('Using saved TLE data {} ({})'.format(sourceFile,
-              time.ctime(os.path.getmtime(sourceFile))))
+    source_name = source['name']
+    source_file = source['file']
+    source_url = source['url']
+    if os.path.isfile(source_file):
+        print('Using saved TLE data {} ({})'.format(source_file,
+              time.ctime(os.path.getmtime(source_file))))
     else:
-        print('Retrieving TLE data from {}'.format(sourceUrl))
-        file = URLopener()
+        print('Retrieving TLE data from {}'.format(source_url))
         try:
-            file.retrieve(sourceUrl, sourceFile)
-        except:
-            print("Error: Failed to get TLE data")
+            print("here")
+            req = Request(source_url, headers={'User-Agent': user_agent})
+            response = urlopen(req)
+            data = response.read() 
+        except Exception as err:
+            print("Error: Failed to get TLE data ({})".format(err))
             return None
         else:
-            print('{} updated'.format(sourceFile))
+            with open(source_file, 'wb') as f:
+                f.write(data)
+            print('{} updated'.format(source_file))
 
-    if sourceFile.lower().endswith('.zip'):
-        print('Unzipping {}...'.format(sourceFile))
-        zip = zipfile.ZipFile(sourceFile)
-        zip.extractall('.')
-        sourceFile = zip.namelist()[0]
-        print('Extracted {}'.format(zip.namelist()))
+    if source_file.lower().endswith('.zip'):
+        print('Unzipping {}...'.format(source_file))
+        zip_data = zipfile.ZipFile(source_file)
+        zip_data.extractall('.')
+        source_file = zip_data.namelist()[0]
+        print('Extracted {}'.format(zip_data.namelist()))
 
     tempContent = []
-    with open(sourceFile) as f:
+    with open(source_file) as f:
         for aline in f:
             tempContent.append(aline.replace('\n', ''))
         print(len(tempContent) // 3,
-              'TLEs loaded from {}'.format(sourceFile))
+              'TLEs loaded from {}'.format(source_file))
 
     return tempContent
 
@@ -209,7 +218,7 @@ def plotSats(savedsats, latitude, longitude, elevation):
     currdate = datetime.utcnow()
     errored_sats = set()
 
-    while 1:
+    while True:
         if SIMSECS > 0:
             currdate += timedelta(seconds=SIMSECS)
         else:
@@ -239,7 +248,9 @@ def plotSats(savedsats, latitude, longitude, elevation):
                     break
             print('name=' + satdata['body'].name,
                   'az=' + str(math.degrees(satdata['body'].az)),
-                  'alt=' + str(math.degrees(satdata['body'].alt)))
+                  'alt=' + str(math.degrees(satdata['body'].alt)),
+                  'color=' + str(satdata['color']),
+            )
 
         for satdata in savedsats:  # for each satellite in the savedsats list
             try:
@@ -247,7 +258,7 @@ def plotSats(savedsats, latitude, longitude, elevation):
                 alt = satdata['body'].alt
             except ValueError:
                 pass  # print("Date out of range")
-            except RuntimeError:
+            except RuntimeError as err:
                 if satdata['name'] not in errored_sats:
                     errored_sats.add(satdata['name'])
                     print("Cannot compute position for {}".format(satdata['name']))
@@ -266,7 +277,7 @@ def plotSats(savedsats, latitude, longitude, elevation):
         ax.xaxis.set_ticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
         ax.yaxis.set_ticklabels([])  # hide radial tick labels
         ax.grid(True)
-        ax.scatter(theta_plot, r_plot, c=colors, alpha=0.5, picker=True)
+        ax.scatter(theta_plot, r_plot, c=colors, edgecolors=color_outline, alpha=color_alpha, picker=True)
         ax.set_rmax(1.0)
         fig.canvas.mpl_connect('pick_event', onpick)
         fig.canvas.mpl_connect('close_event', handle_close)

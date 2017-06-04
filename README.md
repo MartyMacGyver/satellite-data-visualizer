@@ -8,6 +8,8 @@ This project also includes elements of the Python 3 port of this code by pklaus 
 
 TLE data is sourced from http://www.tle.info/
 
+NOTE: TLE.INFO appears to be IPv6 only now. Try browsing to their page - if it doesn't load unless you use IPv6 then that may be a permanent change by them.
+
 More about TLE at https://en.wikipedia.org/wiki/Two-line_element_set
 
 Note: This is developed and tested using Python 2.7 and 3.4 on Windows, but as long as the same libraries are available in your OS this should work there as well.

@@ -20,7 +20,7 @@ Satellite Data Visualizer for Python
 
 Author: Martin Falatic, 2015-10-15
 Based on code by user /u/chknoodle_aggie 2015-08-14 as posted in
-https://www.reddit.com/r/Python/comments/3gwzjr/using_pyephem_i_just_plotted_every_tleinfo/
+https://www.reddit.com/radius/Python/comments/3gwzjr/using_pyephem_i_just_plotted_every_tleinfo/
 
 More about TLE:
 https://en.wikipedia.org/wiki/Two-line_element_set
@@ -38,8 +38,11 @@ import os.path
 import ephem
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import zipfile
 import geocoder
+import warnings
+from collections import namedtuple
 
 try:
     from urllib.request import urlopen, Request
@@ -51,15 +54,22 @@ try:
 except NameError:
     pass
 
+warnings.filterwarnings("ignore",
+    ".*Using default event loop until function specific to this GUI is implemented")
+
+Point = namedtuple('Point', ['x', 'y'])
+curr_time = time.time()
+
 TITLE = "Satellite Data Visualizer for Python"
 DEBUG = False
 SIMSECS = 0  # 60*60
-t = time.time()
-
-user_agent = 'Mozilla/5.0'
-
+defaultLocation = "San Francisco, CA"
 color_outline = '#808080'
 color_alpha = 0.75
+user_agent = 'Mozilla/5.0'
+window_size = Point(x=1200, y=1000)
+update_pause_ms = 100
+running = True
 
 tleSources = [
     {'name':  'McCant\'s classifieds',
@@ -87,7 +97,7 @@ tleSources = [
      'file':  'planet_mc.tle',
      'color': '#00ffff'},
 
-    # {'name':  'Celestrak BREEZE-M R/B',
+    # {'name':  'Celestrak BREEZE-M radius/B',
     #  'url':   'http://www.celestrak.com/NORAD/elements/2012-044.txt',
     #  'file':  '2012-044.txt',
     #  'color': '#0000ff'},
@@ -124,14 +134,14 @@ def readTLEfile(source):
         source_file = zip_data.namelist()[0]
         print('Extracted {}'.format(zip_data.namelist()))
 
-    tempContent = []
+    temp_content = []
     with open(source_file) as f:
         for aline in f:
-            tempContent.append(aline.replace('\n', ''))
-        print(len(tempContent) // 3,
+            temp_content.append(aline.replace('\n', ''))
+        print(len(temp_content) // 3,
               'TLEs loaded from {}'.format(source_file))
 
-    return tempContent
+    return temp_content
 
 
 def processTLEdata(tleSources):
@@ -139,14 +149,14 @@ def processTLEdata(tleSources):
     sats = []
     for source in tleSources:
         print("Processing {}".format(source['name']))
-        tempContent = readTLEfile(source=source)
+        temp_content = readTLEfile(source=source)
         print()
-        if tempContent:
+        if temp_content:
             i_name = 0
-            while 3 * i_name + 2 <= len(tempContent):
-                rawTLEname = tempContent[3 * i_name + 0]
-                rawTLEdat1 = tempContent[3 * i_name + 1]
-                rawTLEdat2 = tempContent[3 * i_name + 2]
+            while 3 * i_name + 2 <= len(temp_content):
+                rawTLEname = temp_content[3 * i_name + 0]
+                rawTLEdat1 = temp_content[3 * i_name + 1]
+                rawTLEdat2 = temp_content[3 * i_name + 2]
                 partsTLEdat1 = rawTLEdat1.split()
                 try:
                     body = ephem.readtle(rawTLEname, rawTLEdat1, rawTLEdat2)
@@ -175,7 +185,6 @@ def processTLEdata(tleSources):
 
 def getLocation():
     ''' Get user location based on input '''
-    defaultLocation = "San Francisco, CA"
     # Note: Pontianak, Indonesia and Quito, Ecuador are right on the equator
     locationKeyword = ''
     while not locationKeyword:
@@ -210,54 +219,77 @@ def plotSats(savedsats, latitude, longitude, elevation):
     print('-'*79)
     print()
 
+    #fig = gcf()
+
     fig = plt.figure()
+    DPI = fig.get_dpi()
+    fig.set_size_inches(window_size.x/float(DPI), window_size.y/float(DPI))
+    # mng = plt.get_current_fig_manager()
+    # mng.resize(1600,900)
     fig.canvas.set_window_title(TITLE)
 
-    global t
-    t = time.time()
+    global curr_time
+    curr_time = time.time()
     currdate = datetime.utcnow()
     errored_sats = set()
+    watched_sat = {'name':"", 'theta':0.0, 'radius':0.0, 'txt':''}
 
-    while True:
+    running = True
+
+    def onpick(event):
+        global curr_time
+        if time.time() - curr_time < 1.0:  # limits calls to 1 per second
+            return
+        curr_time = time.time()
+        ind = event.ind
+        radius = np.take(radius_plot, ind)[0]
+        theta = np.take(theta_plot, ind)[0]
+        for satdata in savedsats:
+            if (math.degrees(theta) == math.degrees(satdata['body'].az) and
+                    math.cos(satdata['body'].alt) == radius):
+                break
+        sat_printable = '{:s}{:s}(az={:0.2f} alt={:0.2f})'.format(
+            satdata['body'].name,
+            ' ',
+            math.degrees(satdata['body'].az),
+            math.degrees(satdata['body'].alt),
+        )
+        print(sat_printable)
+        sat_printable = '{:s}{:s}(az={:0.2f} alt={:0.2f})'.format(
+            satdata['body'].name,
+            '\n',
+            math.degrees(satdata['body'].az),
+            math.degrees(satdata['body'].alt),
+        )
+        watched_sat['name'] = satdata['body'].name
+        watched_sat['txt'] = sat_printable
+        watched_sat['theta'] = theta
+        watched_sat['radius'] = radius
+
+    def handle_close(event):
+        # Any way to make this more useful?
+        print("Close event received")
+
+    fig.canvas.mpl_connect('pick_event', onpick)
+    fig.canvas.mpl_connect('close_event', handle_close)
+
+    while running:
         if SIMSECS > 0:
             currdate += timedelta(seconds=SIMSECS)
         else:
             currdate = datetime.utcnow()
         home.date = currdate
         theta_plot = []
-        r_plot = []
+        radius_plot = []
         colors = []
-
-        def handle_close(event):
-            # This doesn't work well yet
-            # print("Close event received")
-            pass
-
-        # Click on a satellite to print its TLE name to the console
-        def onpick(event):
-            global t
-            if time.time() - t < 1.0:  # limits calls to 1 per second
-                return
-            t = time.time()
-            ind = event.ind
-            r = np.take(r_plot, ind)[0]
-            theta = np.take(theta_plot, ind)[0]
-            for satdata in savedsats:
-                if (math.degrees(theta) == math.degrees(satdata['body'].az) and
-                        math.cos(satdata['body'].alt) == r):
-                    break
-            print('name=' + satdata['body'].name,
-                  'az=' + str(math.degrees(satdata['body'].az)),
-                  'alt=' + str(math.degrees(satdata['body'].alt)),
-                  'color=' + str(satdata['color']),
-            )
 
         for satdata in savedsats:  # for each satellite in the savedsats list
             try:
                 satdata['body'].compute(home)
                 alt = satdata['body'].alt
             except ValueError:
-                pass  # print("Date out of range")
+                #print("Date out of range")
+                pass
             except RuntimeError as err:
                 if satdata['name'] not in errored_sats:
                     errored_sats.add(satdata['name'])
@@ -265,7 +297,7 @@ def plotSats(savedsats, latitude, longitude, elevation):
             else:
                 if math.degrees(alt) > 0.0:
                     theta_plot.append(satdata['body'].az)
-                    r_plot.append(math.cos(satdata['body'].alt))
+                    radius_plot.append(math.cos(satdata['body'].alt))
                     colors.append(satdata['color'])
 
         # plot initialization and display
@@ -277,13 +309,34 @@ def plotSats(savedsats, latitude, longitude, elevation):
         ax.xaxis.set_ticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
         ax.yaxis.set_ticklabels([])  # hide radial tick labels
         ax.grid(True)
-        ax.scatter(theta_plot, r_plot, c=colors, edgecolors=color_outline, alpha=color_alpha, picker=True)
+        marker = mpl.markers.MarkerStyle(marker='o', fillstyle='full')
+        ax.scatter(theta_plot, radius_plot,
+                   marker=marker, picker=True,
+                   c=colors, edgecolors=color_outline, alpha=color_alpha,
+                  )
         ax.set_rmax(1.0)
-        fig.canvas.mpl_connect('pick_event', onpick)
-        fig.canvas.mpl_connect('close_event', handle_close)
-        plt.pause(0.25)  # A pause is needed here, but the loop is rather slow
-        fig.clf()
+        if watched_sat:
+            notate_sat_data(ax=ax, notation=watched_sat)
+        try:
+            plt.pause(update_pause_ms/1000.0)  # A pause is needed here, but the loop is rather slow
+            #fig.clf()
+            plt.cla()
+        except Exception as e:
+            running = False
+            # TODO: Hiding a lot of Tk noise for now - improve this
+            if not str(e).startswith("can't invoke \"update\" command:"):
+                print(e)
 
+def notate_sat_data(ax, notation):
+    noted = ax.annotate(
+        notation['txt'],
+        xy=(notation['theta'], notation['radius']),  # theta, radius
+        #xytext=(0.05, 0.05),    # fraction, fraction
+        xytext=(3, 1.1),    # fraction, fraction
+        horizontalalignment='left',
+        verticalalignment='bottom',
+        )
+    return noted
 
 if __name__ == "__main__":
     print()
@@ -291,9 +344,13 @@ if __name__ == "__main__":
     print(TITLE)
     print('-'*79)
     print()
+    plt.rcParams['toolbar'] = 'None'
+    plt.ion()
     savedsats = processTLEdata(tleSources)
-    g = getLocation()
-    (latitude, longitude) = g.latlng
-    elevation = geocoder.elevation(g.latlng).meters
+    myloc = getLocation()
+    (latitude, longitude) = myloc.latlng
+    elevation = geocoder.elevation(myloc.latlng).meters
     plotSats(savedsats=savedsats, latitude=latitude,
              longitude=longitude, elevation=elevation)
+    print()
+    print("Exiting")

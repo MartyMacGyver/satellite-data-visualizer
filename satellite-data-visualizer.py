@@ -43,21 +43,23 @@ import matplotlib as mpl
 import zipfile
 import geocoder
 import warnings
-from collections import namedtuple
 from configobj import ConfigObj
-from pprint import pprint
+#from collections import namedtuple
+#from pprint import pprint
 try:
+    import urllib
     from urllib.request import urlopen, Request
 except ImportError:
+    import urllib2
     from urllib2 import urlopen, Request
-try:
-    input = raw_input
-except NameError:
-    pass
+
 
 class SatDataViz(object):
     def __init__(self, win_label="title", config_file=None):
         self.win_label = win_label
+        self.savedsats = None
+        self.curr_time = None
+        self.home = None
         if config_file:
             self.load_config(config_file)
 
@@ -85,15 +87,15 @@ class SatDataViz(object):
         source_file = source['file']
         source_url = source['url']
 
-        print('Querying TLE data source {}'.format(source_url))
+        print('Querying TLE data source \"{}\" at {}'.format(source_name, source_url))
         try:
             req = Request(source_url, headers={'User-Agent': user_agent})
             response = urlopen(req)
             headers = response.info()
             new_etag = self.dequote(headers["ETag"])
             new_size = int(headers["Content-Length"])
-        except Exception as err:
-            print("Error: Failed to query url ({})".format(err))
+        except urllib.error.HTTPError as e:
+            print("Error: Failed to query url ({})".format(e))
             return None
         
         if os.path.isfile(source_file):
@@ -106,13 +108,13 @@ class SatDataViz(object):
         #print(curr_size, new_size, curr_size == new_size)
         #print(source['etag'], new_etag, source['etag'] == new_etag)
         if (curr_size == new_size) and (source['etag'] == new_etag):
-            print('Existing TLE data is current'.format(source_url))
+            print('Existing TLE data is current')
         else:
-            print('Retrieving TLE data from {}'.format(source_url))
+            print('Retrieving TLE data')
             try:
                 data = response.read() 
-            except Exception as err:
-                print("Error: Failed to download data ({})".format(err))
+            except urllib.error.HTTPError as e:
+                print("Error: Failed to download data ({})".format(e))
                 return None
             source['etag'] = new_etag
             source['size'] = new_size
@@ -178,10 +180,14 @@ class SatDataViz(object):
     def get_location(self):
         ''' Get user location based on input '''
         # Note: Pontianak, Indonesia and Quito, Ecuador are right on the equator
+        if sys.version_info < (3,0):
+            input_function = raw_input # pylint:disable=undefined-variable
+        else:
+            input_function = input
         default_location = self.config['main']['default_location']
         location_keyword = ''
         while not location_keyword:
-            location_keyword = input(
+            location_keyword = input_function(
                 'Enter location (default="{}"): '.format(default_location))
             if not location_keyword or location_keyword.isspace():
                 location_keyword = default_location
@@ -226,7 +232,7 @@ class SatDataViz(object):
         fig.set_size_inches(int(window_size[0])/float(DPI), int(window_size[1])/float(DPI))
         # mng = plt.get_current_fig_manager()
         # mng.resize(1600,900)
-        fig.canvas.set_window_title(win_label)
+        fig.canvas.set_window_title(self.win_label)
 
         self.curr_time = time.time()
         currdate = datetime.utcnow()
@@ -242,32 +248,35 @@ class SatDataViz(object):
             ind = event.ind
             radius = np.take(radius_plot, ind)[0]
             theta = np.take(theta_plot, ind)[0]
-            for satdata in self.savedsats:
-                if (math.degrees(theta) == math.degrees(satdata['body'].az) and
-                        math.cos(satdata['body'].alt) == radius):
+            satdata = None
+            for this_sat in self.savedsats:
+                if (math.degrees(theta) == math.degrees(this_sat['body'].az) and
+                    radius == math.cos(this_sat['body'].alt)):
+                    satdata = this_sat
                     break
-            sat_printable = '{:s}{:s}(az={:0.2f} alt={:0.2f})'.format(
-                satdata['body'].name,
-                ' ',
-                math.degrees(satdata['body'].az),
-                math.degrees(satdata['body'].alt),
-            )
-            print(sat_printable)
-            sat_printable = '{:s}{:s}(az={:0.2f} alt={:0.2f})'.format(
-                satdata['body'].name,
-                '\n',
-                math.degrees(satdata['body'].az),
-                math.degrees(satdata['body'].alt),
-            )
-            watched_sat['name'] = satdata['body'].name
-            watched_sat['txt'] = sat_printable
-            watched_sat['theta'] = theta
-            watched_sat['radius'] = radius
+            if satdata:
+                sat_printable = '{:s}{:s}(az={:0.2f} alt={:0.2f})'.format(
+                    satdata['body'].name,
+                    ' ',
+                    math.degrees(satdata['body'].az),
+                    math.degrees(satdata['body'].alt),
+                )
+                print(sat_printable)
+                sat_printable = '{:s}{:s}(az={:0.2f} alt={:0.2f})'.format(
+                    satdata['body'].name,
+                    '\n',
+                    math.degrees(satdata['body'].az),
+                    math.degrees(satdata['body'].alt),
+                )
+                watched_sat['name'] = satdata['body'].name
+                watched_sat['txt'] = sat_printable
+                watched_sat['theta'] = theta
+                watched_sat['radius'] = radius
 
         def handle_close(event):
             # Any way to make this more useful?
             print()
-            print("Close event received")
+            print("Event received ({:s})".format(event.name))
 
         fig.canvas.mpl_connect('pick_event', onpick)
         fig.canvas.mpl_connect('close_event', handle_close)
@@ -289,7 +298,7 @@ class SatDataViz(object):
                 except ValueError:
                     #print("Date out of range")
                     pass
-                except RuntimeError as err:
+                except RuntimeError as e:
                     if satdata['name'] not in errored_sats:
                         errored_sats.add(satdata['name'])
                         print("Cannot compute position for {}".format(satdata['name']))
@@ -322,7 +331,7 @@ class SatDataViz(object):
                 plt.cla()
             except Exception as e:
                 running = False
-                # TODO: Hiding a lot of Tk noise for now - improve this
+                # TODO: Hiding a lot of Tk noise for now - improve this if possible
                 if not str(e).startswith("can't invoke \"update\" command:"):
                     print(e)
 
@@ -349,17 +358,17 @@ class SatDataViz(object):
         return noted
 
 if __name__ == "__main__":
-    win_label = "Satellite Data Visualizer for Python"
-    config_file = 'config.ini'
+    my_win_label = "Satellite Data Visualizer for Python"
+    my_config_file = 'config.ini'
 
     print()
     print('-'*79)
-    print(win_label)
+    print(my_win_label)
     print('-'*79)
     print()
 
-    sdv = SatDataViz(win_label=win_label)
-    sdv.load_config(config_file)
+    sdv = SatDataViz(win_label=my_win_label)
+    sdv.load_config(my_config_file)
     sdv.get_location()
     sdv.process_tle_data()
     sdv.save_config()

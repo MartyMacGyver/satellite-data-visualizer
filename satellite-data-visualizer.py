@@ -208,23 +208,20 @@ class SatDataViz(object):
         self.home.lat = str(latitude)    # +N
         self.home.lon = str(longitude)   # +E
         self.home.elevation = elevation  # meters
-        print('Given: {}N {}E, {}m'.format(latitude, longitude, elevation))
-        print('Ephem: {}N {}E, {}m'.format(self.home.lat, self.home.lon, self.home.elevation))
+        print('Given: {}N {}E, {:0.2f}m'.format(latitude, longitude, elevation))
+        print('Ephem: {}N {}E, {:0.2f}m'.format(self.home.lat, self.home.lon, self.home.elevation))
         print()
 
     def plot_sats(self):
         warnings.filterwarnings("ignore",
             ".*Using default event loop until function specific to this GUI is implemented")
-
         color_outline = self.config['main']['color_outline']
         color_alpha = float(self.config['main']['color_alpha'])
         update_pause_ms = int(self.config['main']['update_pause_ms'])
         window_size = self.config['main']['window_size']
         secs_per_step = int(self.config['main']['secs_per_step'])
-
         print('-'*79)
         print()
-
         plt.rcParams['toolbar'] = 'None'
         plt.ion()
         fig = plt.figure()
@@ -233,16 +230,13 @@ class SatDataViz(object):
         # mng = plt.get_current_fig_manager()
         # mng.resize(1600,900)
         fig.canvas.set_window_title(self.win_label)
-
         self.curr_time = time.time()
         currdate = datetime.utcnow()
         errored_sats = set()
         watched_sat = {'name':"", 'theta':0.0, 'radius':0.0, 'txt':''}
 
-        running = True
-
         def onpick(event):
-            if time.time() - self.curr_time < 1.0:  # limits calls to 1 per second
+            if time.time() - self.curr_time < 0.25:  # limits calls to 1 per second
                 return
             self.curr_time = time.time()
             ind = event.ind
@@ -280,7 +274,7 @@ class SatDataViz(object):
 
         fig.canvas.mpl_connect('pick_event', onpick)
         fig.canvas.mpl_connect('close_event', handle_close)
-
+        running = True
         while running:
             if secs_per_step:
                 currdate += timedelta(seconds=secs_per_step)
@@ -290,7 +284,6 @@ class SatDataViz(object):
             theta_plot = []
             radius_plot = []
             colors = []
-
             for satdata in self.savedsats:  # for each satellite in the savedsats list
                 try:
                     satdata['body'].compute(self.home)
@@ -307,19 +300,19 @@ class SatDataViz(object):
                         theta_plot.append(satdata['body'].az)
                         radius_plot.append(math.cos(satdata['body'].alt))
                         colors.append(satdata['color'])
-
             # plot initialization and display
             pltTitle = str(self.home.date)
             ax = plt.subplot(111, polar=True)
             ax.set_title(pltTitle, va='bottom')
-            ax.set_theta_offset(np.pi / 2.0)  # Top = 0 deg = north
+            ax.set_theta_offset(np.pi / 2.0)  # Top = 0 deg = North
             ax.set_theta_direction(-1)  # clockwise
             ax.xaxis.set_ticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
             ax.yaxis.set_ticklabels([])  # hide radial tick labels
             ax.grid(True)
             marker = mpl.markers.MarkerStyle(marker='o', fillstyle='full')
-            ax.scatter(theta_plot, radius_plot,
-                       marker=marker, picker=True,
+            # Note: you can't currently pass multiple marker styles in an array like colors
+            ax.scatter(theta_plot, radius_plot, marker=marker,
+                       picker=1, # This sets the tolerance for clicking on a point
                        c=colors, edgecolors=color_outline, alpha=color_alpha,
                       )
             ax.set_rmax(1.0)

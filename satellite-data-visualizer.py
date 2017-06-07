@@ -44,6 +44,7 @@ import zipfile
 import geocoder
 import warnings
 from configobj import ConfigObj
+import threading
 #from collections import namedtuple
 #from pprint import pprint
 try:
@@ -244,9 +245,17 @@ class SatDataViz(object):
         picked_sats = []
         plotted_sats = []
         last_picked = [None]  # Keep data mutable
+        data_ok = threading.Event()
+
+        def handle_close(event):
+            # Any way to make this more useful?
+            print()
+            print("Event received ({:s})".format(event.name))
+        fig.canvas.mpl_connect('close_event', handle_close)
 
         def onpick(event):
             #print("Picked  at", time.time(), event.mouseevent)
+            data_ok.wait()
             last_picked[0] = event.mouseevent
             if time.time() - self.curr_time < self.click_wait_s:  # Rate limiting
                 return
@@ -268,14 +277,9 @@ class SatDataViz(object):
                     # ))
         fig.canvas.mpl_connect('pick_event', onpick)
 
-        def handle_close(event):
-            # Any way to make this more useful?
-            print()
-            print("Event received ({:s})".format(event.name))
-        fig.canvas.mpl_connect('close_event', handle_close)
-
         def onclick(event):
             #print("Clicked at", time.time(), event)
+            data_ok.wait()
             if time.time() - self.curr_time < self.click_wait_s:  # Rate limiting
                 return
             self.curr_time = time.time()
@@ -290,6 +294,7 @@ class SatDataViz(object):
 
         running = True
         while running:
+            data_ok.clear()
             if secs_per_step:
                 currdate += timedelta(seconds=secs_per_step)
             else:
@@ -326,6 +331,7 @@ class SatDataViz(object):
                         plotted_sats.append(satdata)
                         plot_idx += 1
             # plot initialization and display
+            data_ok.set()
             pltTitle = str(self.home.date)
             ax = plt.subplot(111, polar=True)
             ax.set_title(pltTitle, va='bottom')

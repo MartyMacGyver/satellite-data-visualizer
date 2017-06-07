@@ -35,7 +35,9 @@ import math
 import time
 from datetime import datetime, timedelta
 import sys
+import os
 import os.path
+import errno
 import ephem
 import numpy as np
 import matplotlib.pyplot as plt
@@ -54,14 +56,26 @@ except ImportError:
     import urllib2
     from urllib2 import urlopen, Request
 
+def mkdir_checked(path):
+    try:
+        os.makedirs(path)
+    except OSError as exception:
+        if exception.errno != errno.EEXIST:
+            raise
+
+def sanitize_filename(n):
+    ok_chars = list(r"""._' ,;[](){}!@#%^&""")
+    return "".join(c for c in n if c.isalnum() or c in ok_chars).rstrip()
 
 class SatDataViz(object):
     def __init__(self, win_label="title", config_file=None):
-        self.click_wait_s = 0.25
+        self.click_wait_s = 0.10
+        self.data_dir = "tledata"
         self.win_label = win_label
         self.savedsats = None
         self.curr_time = None
         self.home = None
+        mkdir_checked(self.data_dir)
         if config_file:
             self.load_config(config_file)
 
@@ -86,7 +100,7 @@ class SatDataViz(object):
         ''' Get and read a TLE file (unzip if necessary) '''
         user_agent = self.config['main']['user_agent']
         source_name = source['name']
-        source_file = source['file']
+        source_file = os.path.join(self.data_dir, sanitize_filename(source['file']))
         source_url = source['url']
 
         print('Querying TLE data source \"{}\" at {}'.format(source_name, source_url))
@@ -141,7 +155,7 @@ class SatDataViz(object):
 
     def process_tle_data(self):
         ''' Process each TLE entry '''
-        sats = []
+        self.savedsats = []
         bodies_dedup = {}
         tleSources = [s for s in self.config.sections if s.startswith('source ')]
         for source_section in tleSources:
@@ -168,23 +182,25 @@ class SatDataViz(object):
                         number = partsTLEdat1[1]
                         designator = partsTLEdat1[2]
                         (body_namepart, body_datapart) = body.writedb().split(',', 1)
-                        if body_datapart in bodies_dedup:
-                            bodies_dedup[body_datapart].append(body_namepart)
-                            print("Dup", body_namepart)
-                        else:
-                            bodies_dedup[body_datapart] = [body_namepart]
-                        sats.append({'name': body.name,
+                        new_sat = {'name': body.name,
                                      'number': number,
                                      'designator': designator,
                                      'color': source['color'],
                                      'body': body,
                                      'picked': False,
-                                    })
+                                    }
+                        if body_datapart in bodies_dedup:
+                            print("Updated idx {} for {}".format(sat_index, body_namepart))
+                            sat_index = bodies_dedup[body_datapart]
+                            self.savedsats[sat_index] = new_sat
+                        else:
+                            self.savedsats.append(new_sat)
+                            sat_index = len(self.savedsats)-1
+                            bodies_dedup[body_datapart] = sat_index
                         #print("[{}] {} {} {} {}".
                         #    format(source_section, body.name, number, designator, body.writedb())
                     i_name += 1
             print()
-        self.savedsats = sats
 
     def get_location(self):
         ''' Get user location based on input '''
@@ -240,12 +256,15 @@ class SatDataViz(object):
         # mng.resize(1600,900)
         fig.canvas.set_window_title(self.win_label)
         self.curr_time = time.time()
-        currdate = datetime.utcnow()
+        curr_date = datetime.utcnow()
         errored_sats = set()
         picked_sats = []
         plotted_sats = []
         last_picked = [None]  # Keep data mutable
         data_ok = threading.Event()
+        data_ok.set()
+        click_ok = threading.Event()
+        click_ok.set()
 
         def handle_close(event):
             # Any way to make this more useful?
@@ -254,57 +273,62 @@ class SatDataViz(object):
         fig.canvas.mpl_connect('close_event', handle_close)
 
         def onpick(event):
-            #print("Picked  at", time.time(), event.mouseevent)
-            data_ok.wait()
+            ''' These *only* happen with data points get clicked by any button '''
+            # print("Picked  at", time.time(), event.mouseevent)
             last_picked[0] = event.mouseevent
             if time.time() - self.curr_time < self.click_wait_s:  # Rate limiting
                 return
             self.curr_time = time.time()
-            plot_idxs = event.ind
-            for satdata in self.savedsats:
-                if satdata['plot_idx'] and satdata['plot_idx'] in plot_idxs:
-                    print(satdata['name'], "plot_idx=", satdata['plot_idx'])
-                    if satdata['picked']:
-                        satdata['picked'] = False
-                    else:
-                        satdata['picked'] = True
-                        picked_sats.append(satdata)
-                    # print('{:s}{:s}(az={:0.2f} alt={:0.2f})'.format(
-                    #     satdata['body'].name,
-                    #     ' ',
-                    #     math.degrees(satdata['body'].az),
-                    #     math.degrees(satdata['body'].alt),
-                    # ))
+            data_ok.wait()  # Pause while processing data
+            click_ok.clear()
+            for plot_idx in event.ind:
+                satdata = plotted_sats[plot_idx]
+                # print(satdata['name'], "plot_idx=", satdata['plot_idx'])
+                if satdata['picked']:
+                    satdata['picked'] = False
+                    if satdata in picked_sats:
+                        picked_sats.remove(satdata)
+                else:
+                    satdata['picked'] = True
+                    picked_sats.append(satdata)
+            click_ok.set()
         fig.canvas.mpl_connect('pick_event', onpick)
 
         def onclick(event):
-            #print("Clicked at", time.time(), event)
-            data_ok.wait()
+            ''' These follow onpick() events as well '''
+            # print("Clicked at", time.time(), event)
             if time.time() - self.curr_time < self.click_wait_s:  # Rate limiting
                 return
             self.curr_time = time.time()
+            data_ok.wait()  # Pause while processing data
+            click_ok.clear()
             if last_picked[0] == event:
-                print("Part of last pick")
+                pass  # print("Part of last pick")
             else:
-                if event.button==3:
-                    for satdata in picked_sats:
+                if event.button == 3:
+                    for satdata in picked_sats[:]:
                         satdata['picked'] = False
-            print()
+                    picked_sats.clear()
+            # print(picked_sats)
+            # print()
+            click_ok.set()
         fig.canvas.mpl_connect('button_press_event', onclick)
 
         running = True
         while running:
+            click_ok.wait()  # Pause while processing a click
             data_ok.clear()
             if secs_per_step:
-                currdate += timedelta(seconds=secs_per_step)
+                curr_date += timedelta(seconds=secs_per_step)
             else:
-                currdate = datetime.utcnow()
-            self.home.date = currdate
+                curr_date = datetime.utcnow()
+            self.home.date = curr_date
             theta_plot = []
             radius_plot = []
             colors = []
             plot_idx = 0
             noted_sats = []
+            plotted_sats = []
             for satdata in self.savedsats:  # for each satellite in the savedsats list
                 satdata['plot_idx'] = None
                 try:
@@ -330,10 +354,11 @@ class SatDataViz(object):
                             noted_sats.append(satdata)  # Finalized data here
                         plotted_sats.append(satdata)
                         plot_idx += 1
+            data_ok.set()  # Done with the critical part
             # plot initialization and display
-            data_ok.set()
-            pltTitle = str(self.home.date)
             ax = plt.subplot(111, polar=True)
+            pltTitle = "{} UTC\nSatellites overhead: {}".format(
+                curr_date, len(plotted_sats))
             ax.set_title(pltTitle, va='bottom')
             ax.set_theta_offset(np.pi / 2.0)  # Top = 0 deg = North
             ax.set_theta_direction(-1)  # clockwise

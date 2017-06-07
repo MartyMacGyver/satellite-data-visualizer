@@ -40,8 +40,9 @@ import os.path
 import errno
 import ephem
 import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib as mpl
+mpl.use('TkAgg')  # Must happen before pyplot import!
+import matplotlib.pyplot as plt
 import zipfile
 import geocoder
 import warnings
@@ -241,20 +242,20 @@ class SatDataViz(object):
                 location_keyword = ''
             else:
                 print()
-                print('Location found: "{}"'.format(gloc.location))
-        self.config['main']['default_location'] = location_keyword
         #print()
         #print(gloc.json)
         #print()
-        self.latlng = "{}, {}".format(gloc.lat, gloc.lng)
         self.location = gloc.address
+        self.config['main']['default_location'] = self.location
+        self.latlng = "{}, {}".format(gloc.lat, gloc.lng)
         self.elevation = geocoder.elevation(gloc.latlng).meters
         self.home = ephem.Observer()
         self.home.elevation = self.elevation  # meters
         (latitude, longitude) = gloc.latlng
-        self.home.lat = str(latitude)    # +N
-        self.home.lon = str(longitude)   # +E
-        print('Ephem: {}N {}E, {:0.2f}m'.format(self.home.lat, self.home.lon, self.home.elevation))
+        self.home.lat = str(latitude)  # +N
+        self.home.lon = str(longitude)  # +E
+        print("Location: {} ({}) {}m".format(self.location, self.latlng, self.elevation))
+        print("Ephem: {}N {}E, {:0.2f}m".format(self.home.lat, self.home.lon, self.home.elevation))
         print()
 
     def plot_sats(self):
@@ -328,7 +329,7 @@ class SatDataViz(object):
                 if event.button == 3:
                     for satdata in picked_sats[:]:
                         satdata['picked'] = False
-                    picked_sats.clear()
+                    del picked_sats[:]
             click_ok.set()
         fig.canvas.mpl_connect('button_press_event', onclick)
 

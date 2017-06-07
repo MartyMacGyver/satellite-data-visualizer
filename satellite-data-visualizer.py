@@ -47,14 +47,13 @@ import geocoder
 import warnings
 from configobj import ConfigObj
 import threading
-#from collections import namedtuple
-#from pprint import pprint
 try:
     import urllib
     from urllib.request import urlopen, Request
 except ImportError:
-    import urllib2
+    import urllib2 # pylint: disable=unused-import
     from urllib2 import urlopen, Request
+
 
 def mkdir_checked(path):
     try:
@@ -63,29 +62,48 @@ def mkdir_checked(path):
         if exception.errno != errno.EEXIST:
             raise
 
-def sanitize_filename(n):
+def sanitize_filename(name):
     ok_chars = list(r"""._' ,;[](){}!@#%^&""")
-    return "".join(c for c in n if c.isalnum() or c in ok_chars).rstrip()
+    return "".join(c for c in name if c.isalnum() or c in ok_chars).rstrip()
+
+def dequote(s):
+    """
+    From https://stackoverflow.com/a/20577580/760905
+    If a string has single or double quotes around it, remove them.
+    Make sure the pair of quotes match.
+    If a matching pair of quotes is not found, return the string unchanged.
+    """
+    if (s[0] == s[-1]) and s.startswith(("'", '"')):
+        return s[1:-1]
+    return s
+
 
 class SatDataViz(object):
-    def __init__(self, win_label="title", config_file=None):
+    def __init__(self, win_label=None, config_file=None):
+        if win_label:
+            self.win_label = win_label
+        else:
+            self.win_label = "Satellite Data Visualizer for Python"
+        print(self.win_label)
+        print()
         self.click_wait_s = 0.10
         self.data_dir = "tledata"
-        self.win_label = win_label
         self.savedsats = None
         self.curr_time = None
         self.home = None
+        self.latlng = None
+        self.location = None
+        self.elevation = None
+        if config_file:
+            self.config_file = config_file
+        else:
+            self.config_file = 'config.ini'
         mkdir_checked(self.data_dir)
-        if config_file:
-            self.load_config(config_file)
+        self.load_config()
 
-    def save_config(self, config_file=None):
-        if config_file:
-            self.config.filename = config_file
-        #self.config.unrepr = True
-        self.config.write()
-
-    def load_config(self, config_file):
+    def load_config(self, config_file=None):
+        if not config_file:
+            config_file = self.config_file
         self.config = ConfigObj(config_file)
         #pprint(sdv.config)
         # TODO: validate inputs to avoid possible crashes
@@ -95,6 +113,12 @@ class SatDataViz(object):
         #    self.config['main']['window_size']
         #    self.config['main']['user_agent']
         #    self.config['main']['default_location']
+
+    def save_config(self, config_file=None):
+        if config_file:
+            self.config.filename = config_file
+        #self.config.unrepr = True
+        self.config.write()
 
     def readTLEfile(self, source):
         ''' Get and read a TLE file (unzip if necessary) '''
@@ -108,7 +132,7 @@ class SatDataViz(object):
             req = Request(source_url, headers={'User-Agent': user_agent})
             response = urlopen(req)
             headers = response.info()
-            new_etag = self.dequote(headers["ETag"])
+            new_etag = dequote(headers["ETag"])
             new_size = int(headers["Content-Length"])
         except urllib.error.HTTPError as e:
             print("Error: Failed to query url ({})".format(e))
@@ -120,8 +144,6 @@ class SatDataViz(object):
                   source_file, curr_size, curr_modtime))
         else:
             curr_size = 0
-        #print(curr_size, new_size, curr_size == new_size)
-        #print(source['etag'], new_etag, source['etag'] == new_etag)
         if (curr_size == new_size) and (source['etag'] == new_etag):
             print('Existing TLE data is current')
         else:
@@ -137,14 +159,12 @@ class SatDataViz(object):
             with open(source_file, 'wb') as f:
                 f.write(data)
             print('{} updated'.format(source_file))
-
         if source_file.lower().endswith('.zip'):
             print('Unzipping {}...'.format(source_file))
             zip_data = zipfile.ZipFile(source_file)
-            zip_data.extractall('.')
-            source_file = zip_data.namelist()[0]
+            zip_data.extractall(path=self.data_dir)
+            source_file = os.path.join(self.data_dir, sanitize_filename(zip_data.namelist()[0]))
             print('Extracted {}'.format(zip_data.namelist()))
-
         temp_content = []
         with open(source_file) as f:
             for aline in f:
@@ -178,27 +198,26 @@ class SatDataViz(object):
                         print("       " + rawTLEdat2)
                         print()
                     else:
-                        name = body.name
                         number = partsTLEdat1[1]
                         designator = partsTLEdat1[2]
                         (body_namepart, body_datapart) = body.writedb().split(',', 1)
                         new_sat = {'name': body.name,
-                                     'number': number,
-                                     'designator': designator,
-                                     'color': source['color'],
-                                     'body': body,
-                                     'picked': False,
-                                    }
+                                   'number': number,
+                                   'designator': designator,
+                                   'source_num': source_section.split(' ', 1)[1],
+                                   'source_name': source['name'],
+                                   'color': source['color'],
+                                   'body': body,
+                                   'picked': False,
+                                  }
                         if body_datapart in bodies_dedup:
-                            print("Updated idx {} for {}".format(sat_index, body_namepart))
                             sat_index = bodies_dedup[body_datapart]
                             self.savedsats[sat_index] = new_sat
+                            print("Updated idx {} for {}".format(sat_index, body_namepart))
                         else:
                             self.savedsats.append(new_sat)
                             sat_index = len(self.savedsats)-1
                             bodies_dedup[body_datapart] = sat_index
-                        #print("[{}] {} {} {} {}".
-                        #    format(source_section, body.name, number, designator, body.writedb())
                     i_name += 1
             print()
 
@@ -216,24 +235,25 @@ class SatDataViz(object):
                 'Enter location (default="{}"): '.format(default_location))
             if not location_keyword or location_keyword.isspace():
                 location_keyword = default_location
-            g = geocoder.google(location_keyword)
-            if g.status != 'OK':
+            gloc = geocoder.google(location_keyword)
+            if gloc.status != 'OK':
                 print('Location not found: "{}"'.format(location_keyword))
                 location_keyword = ''
             else:
                 print()
-                print('Location found: "{}"'.format(g.location))
+                print('Location found: "{}"'.format(gloc.location))
         self.config['main']['default_location'] = location_keyword
         #print()
-        #print(g.json)
+        #print(gloc.json)
         #print()
-        (latitude, longitude) = g.latlng
-        elevation = geocoder.elevation(g.latlng).meters
+        self.latlng = "{}, {}".format(gloc.lat, gloc.lng)
+        self.location = gloc.address
+        self.elevation = geocoder.elevation(gloc.latlng).meters
         self.home = ephem.Observer()
+        self.home.elevation = self.elevation  # meters
+        (latitude, longitude) = gloc.latlng
         self.home.lat = str(latitude)    # +N
         self.home.lon = str(longitude)   # +E
-        self.home.elevation = elevation  # meters
-        print('Given: {}N {}E, {:0.2f}m'.format(latitude, longitude, elevation))
         print('Ephem: {}N {}E, {:0.2f}m'.format(self.home.lat, self.home.lon, self.home.elevation))
         print()
 
@@ -309,15 +329,13 @@ class SatDataViz(object):
                     for satdata in picked_sats[:]:
                         satdata['picked'] = False
                     picked_sats.clear()
-            # print(picked_sats)
-            # print()
             click_ok.set()
         fig.canvas.mpl_connect('button_press_event', onclick)
 
         running = True
         while running:
             click_ok.wait()  # Pause while processing a click
-            data_ok.clear()
+            data_ok.clear()  # Don't let clicks use stale data
             if secs_per_step:
                 curr_date += timedelta(seconds=secs_per_step)
             else:
@@ -344,8 +362,8 @@ class SatDataViz(object):
                 else:
                     if math.degrees(alt) > 0.0:
                         satdata['plot_idx'] = plot_idx
-                        theta_plot.append(satdata['body'].az)
                         radius_plot.append(math.cos(satdata['body'].alt))
+                        theta_plot.append(satdata['body'].az)
                         if satdata['picked']:
                             colors.append("#000000")
                         else:
@@ -354,17 +372,18 @@ class SatDataViz(object):
                             noted_sats.append(satdata)  # Finalized data here
                         plotted_sats.append(satdata)
                         plot_idx += 1
-            data_ok.set()  # Done with the critical part
             # plot initialization and display
             ax = plt.subplot(111, polar=True)
-            pltTitle = "{} UTC\nSatellites overhead: {}".format(
-                curr_date, len(plotted_sats))
-            ax.set_title(pltTitle, va='bottom')
+            title_locn = "{} ({}) {}m".format(self.location, self.latlng, self.elevation)
+            title_date = "{} UTC".format(curr_date)
+            title_stat = "Satellites overhead: {}".format(len(plotted_sats))
+            ax.set_title('\n'.join([title_locn, title_date, title_stat]), va='bottom')
             ax.set_theta_offset(np.pi / 2.0)  # Top = 0 deg = North
             ax.set_theta_direction(-1)  # clockwise
             ax.xaxis.set_ticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
             ax.yaxis.set_ticklabels([])  # hide radial tick labels
             ax.grid(True)
+            ax.set_facecolor('ivory')
             marker = mpl.markers.MarkerStyle(marker='o', fillstyle='full')
             # Note: you can't currently pass multiple marker styles in an array like colors
             ax.scatter(theta_plot, radius_plot, marker=marker,
@@ -372,10 +391,11 @@ class SatDataViz(object):
                        c=colors, edgecolors=color_outline, alpha=color_alpha,
                       )
             ax.set_rmax(1.0)
-            self.notate_sat_data(ax=ax, noted_sats=noted_sats)
-            plt.subplots_adjust(right=0.6)
+            self.notate_sat_data(ax=ax, noted_sats=picked_sats)
+            plt.subplots_adjust(left=0.05, right=0.6)
+            data_ok.set()  # Done
             try:
-                plt.pause(update_pause_ms/1000.0)  # A pause is needed here, but the loop is rather slow
+                plt.pause(update_pause_ms/1000.0)  # Required, but the loop is rather slow anyway
                 #fig.clf()
                 plt.cla()
             except Exception as e:
@@ -385,45 +405,34 @@ class SatDataViz(object):
                     print(e)
 
     def notate_sat_data(self, ax, noted_sats):
-        notes = []
+        notes = ["Tracking list:\n"]
         for satdata in noted_sats:
             notes.append(
-                '{:s} (az={:0.2f} alt={:0.2f})'.format(
-                    satdata['body'].name,
-                    math.degrees(satdata['body'].az),
+                '[{:s}] "{:s}" [{:s}/{:s}] (alt={:0.2f} az={:0.2f}) (ra={:0.2f} dec={:0.2f})'.format(
+                    satdata['source_num'],
+                    satdata['name'],
+                    satdata['number'],
+                    satdata['designator'],
                     math.degrees(satdata['body'].alt),
+                    math.degrees(satdata['body'].az),
+                    math.degrees(satdata['body'].ra),
+                    math.degrees(satdata['body'].dec),
             ))
+        if len(notes) <= 1:
+            notes.append("(none)")
         ax.annotate(
             '\n'.join(notes),
             xy=(0.0, 0.0),  # theta, radius
-            xytext=(math.pi/2.0, 1.2),    # fraction, fraction
+            xytext=(math.pi/2.0, 1.25),    # fraction, fraction
             horizontalalignment='left',
             verticalalignment='center',
-            )
-
-    def dequote(self, s):
-        """
-        From https://stackoverflow.com/a/20577580/760905
-        If a string has single or double quotes around it, remove them.
-        Make sure the pair of quotes match.
-        If a matching pair of quotes is not found, return the string unchanged.
-        """
-        if (s[0] == s[-1]) and s.startswith(("'", '"')):
-            return s[1:-1]
-        return s
+        )
 
 if __name__ == "__main__":
-    my_win_label = "Satellite Data Visualizer for Python"
-    my_config_file = 'config.ini'
-
     print()
     print('-'*79)
-    print(my_win_label)
-    print('-'*79)
-    print()
 
-    sdv = SatDataViz(win_label=my_win_label)
-    sdv.load_config(my_config_file)
+    sdv = SatDataViz()
     sdv.get_location()
     sdv.process_tle_data()
     sdv.save_config()

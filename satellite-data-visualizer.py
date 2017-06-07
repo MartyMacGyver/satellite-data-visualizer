@@ -56,6 +56,7 @@ except ImportError:
 
 class SatDataViz(object):
     def __init__(self, win_label="title", config_file=None):
+        self.click_wait_s = 0.25
         self.win_label = win_label
         self.savedsats = None
         self.curr_time = None
@@ -96,8 +97,7 @@ class SatDataViz(object):
             new_size = int(headers["Content-Length"])
         except urllib.error.HTTPError as e:
             print("Error: Failed to query url ({})".format(e))
-            return None
-        
+
         if os.path.isfile(source_file):
             curr_size = os.path.getsize(source_file)
             curr_modtime = time.ctime(os.path.getmtime(source_file))
@@ -115,9 +115,10 @@ class SatDataViz(object):
                 data = response.read() 
             except urllib.error.HTTPError as e:
                 print("Error: Failed to download data ({})".format(e))
-                return None
-            source['etag'] = new_etag
-            source['size'] = new_size
+                print("Will use existing data if present")
+            else:
+                source['etag'] = new_etag
+                source['size'] = new_size
             with open(source_file, 'wb') as f:
                 f.write(data)
             print('{} updated'.format(source_file))
@@ -140,12 +141,12 @@ class SatDataViz(object):
     def process_tle_data(self):
         ''' Process each TLE entry '''
         sats = []
+        bodies_dedup = {}
         tleSources = [s for s in self.config.sections if s.startswith('source ')]
         for source_section in tleSources:
             source = self.config[source_section]
             print("Processing {}".format(source['name']))
             temp_content = self.readTLEfile(source=source)
-            print()
             if temp_content:
                 i_name = 0
                 while 3 * i_name + 2 <= len(temp_content):
@@ -165,16 +166,23 @@ class SatDataViz(object):
                         name = body.name
                         number = partsTLEdat1[1]
                         designator = partsTLEdat1[2]
-                        sats.append({'name': name,
+                        (body_namepart, body_datapart) = body.writedb().split(',', 1)
+                        if body_datapart in bodies_dedup:
+                            bodies_dedup[body_datapart].append(body_namepart)
+                            print("Dup", body_namepart)
+                        else:
+                            bodies_dedup[body_datapart] = [body_namepart]
+                        sats.append({'name': body.name,
                                      'number': number,
                                      'designator': designator,
                                      'color': source['color'],
-                                     'body': body, })
-                        # print("{} {} {} {}".
-                        #     format(name, number, designator, body))
+                                     'body': body,
+                                     'picked': False,
+                                    })
+                        #print("[{}] {} {} {} {}".
+                        #    format(source_section, body.name, number, designator, body.writedb())
                     i_name += 1
-                    # if i_name > 100:
-                    #     break
+            print()
         self.savedsats = sats
 
     def get_location(self):
@@ -233,47 +241,53 @@ class SatDataViz(object):
         self.curr_time = time.time()
         currdate = datetime.utcnow()
         errored_sats = set()
-        watched_sat = {'name':"", 'theta':0.0, 'radius':0.0, 'txt':''}
+        picked_sats = []
+        plotted_sats = []
+        last_picked = [None]  # Keep data mutable
 
         def onpick(event):
-            if time.time() - self.curr_time < 0.25:  # limits calls to 1 per second
+            #print("Picked  at", time.time(), event.mouseevent)
+            last_picked[0] = event.mouseevent
+            if time.time() - self.curr_time < self.click_wait_s:  # Rate limiting
                 return
             self.curr_time = time.time()
-            ind = event.ind
-            radius = np.take(radius_plot, ind)[0]
-            theta = np.take(theta_plot, ind)[0]
-            satdata = None
-            for this_sat in self.savedsats:
-                if (math.degrees(theta) == math.degrees(this_sat['body'].az) and
-                    radius == math.cos(this_sat['body'].alt)):
-                    satdata = this_sat
-                    break
-            if satdata:
-                sat_printable = '{:s}{:s}(az={:0.2f} alt={:0.2f})'.format(
-                    satdata['body'].name,
-                    ' ',
-                    math.degrees(satdata['body'].az),
-                    math.degrees(satdata['body'].alt),
-                )
-                print(sat_printable)
-                sat_printable = '{:s}{:s}(az={:0.2f} alt={:0.2f})'.format(
-                    satdata['body'].name,
-                    '\n',
-                    math.degrees(satdata['body'].az),
-                    math.degrees(satdata['body'].alt),
-                )
-                watched_sat['name'] = satdata['body'].name
-                watched_sat['txt'] = sat_printable
-                watched_sat['theta'] = theta
-                watched_sat['radius'] = radius
+            plot_idxs = event.ind
+            for satdata in self.savedsats:
+                if satdata['plot_idx'] and satdata['plot_idx'] in plot_idxs:
+                    print(satdata['name'], "plot_idx=", satdata['plot_idx'])
+                    if satdata['picked']:
+                        satdata['picked'] = False
+                    else:
+                        satdata['picked'] = True
+                        picked_sats.append(satdata)
+                    # print('{:s}{:s}(az={:0.2f} alt={:0.2f})'.format(
+                    #     satdata['body'].name,
+                    #     ' ',
+                    #     math.degrees(satdata['body'].az),
+                    #     math.degrees(satdata['body'].alt),
+                    # ))
+        fig.canvas.mpl_connect('pick_event', onpick)
 
         def handle_close(event):
             # Any way to make this more useful?
             print()
             print("Event received ({:s})".format(event.name))
-
-        fig.canvas.mpl_connect('pick_event', onpick)
         fig.canvas.mpl_connect('close_event', handle_close)
+
+        def onclick(event):
+            #print("Clicked at", time.time(), event)
+            if time.time() - self.curr_time < self.click_wait_s:  # Rate limiting
+                return
+            self.curr_time = time.time()
+            if last_picked[0] == event:
+                print("Part of last pick")
+            else:
+                if event.button==3:
+                    for satdata in picked_sats:
+                        satdata['picked'] = False
+            print()
+        fig.canvas.mpl_connect('button_press_event', onclick)
+
         running = True
         while running:
             if secs_per_step:
@@ -284,7 +298,10 @@ class SatDataViz(object):
             theta_plot = []
             radius_plot = []
             colors = []
+            plot_idx = 0
+            noted_sats = []
             for satdata in self.savedsats:  # for each satellite in the savedsats list
+                satdata['plot_idx'] = None
                 try:
                     satdata['body'].compute(self.home)
                     alt = satdata['body'].alt
@@ -297,9 +314,17 @@ class SatDataViz(object):
                         print("Cannot compute position for {}".format(satdata['name']))
                 else:
                     if math.degrees(alt) > 0.0:
+                        satdata['plot_idx'] = plot_idx
                         theta_plot.append(satdata['body'].az)
                         radius_plot.append(math.cos(satdata['body'].alt))
-                        colors.append(satdata['color'])
+                        if satdata['picked']:
+                            colors.append("#000000")
+                        else:
+                            colors.append(satdata['color'])
+                        if satdata['picked']:
+                            noted_sats.append(satdata)  # Finalized data here
+                        plotted_sats.append(satdata)
+                        plot_idx += 1
             # plot initialization and display
             pltTitle = str(self.home.date)
             ax = plt.subplot(111, polar=True)
@@ -316,8 +341,8 @@ class SatDataViz(object):
                        c=colors, edgecolors=color_outline, alpha=color_alpha,
                       )
             ax.set_rmax(1.0)
-            if watched_sat:
-                self.notate_sat_data(ax=ax, notation=watched_sat)
+            self.notate_sat_data(ax=ax, noted_sats=noted_sats)
+            plt.subplots_adjust(right=0.6)
             try:
                 plt.pause(update_pause_ms/1000.0)  # A pause is needed here, but the loop is rather slow
                 #fig.clf()
@@ -327,6 +352,23 @@ class SatDataViz(object):
                 # TODO: Hiding a lot of Tk noise for now - improve this if possible
                 if not str(e).startswith("can't invoke \"update\" command:"):
                     print(e)
+
+    def notate_sat_data(self, ax, noted_sats):
+        notes = []
+        for satdata in noted_sats:
+            notes.append(
+                '{:s} (az={:0.2f} alt={:0.2f})'.format(
+                    satdata['body'].name,
+                    math.degrees(satdata['body'].az),
+                    math.degrees(satdata['body'].alt),
+            ))
+        ax.annotate(
+            '\n'.join(notes),
+            xy=(0.0, 0.0),  # theta, radius
+            xytext=(math.pi/2.0, 1.2),    # fraction, fraction
+            horizontalalignment='left',
+            verticalalignment='center',
+            )
 
     def dequote(self, s):
         """
@@ -338,17 +380,6 @@ class SatDataViz(object):
         if (s[0] == s[-1]) and s.startswith(("'", '"')):
             return s[1:-1]
         return s
-
-    def notate_sat_data(self, ax, notation):
-        noted = ax.annotate(
-            notation['txt'],
-            xy=(notation['theta'], notation['radius']),  # theta, radius
-            #xytext=(0.05, 0.05),    # fraction, fraction
-            xytext=(3, 1.1),    # fraction, fraction
-            horizontalalignment='left',
-            verticalalignment='bottom',
-            )
-        return noted
 
 if __name__ == "__main__":
     my_win_label = "Satellite Data Visualizer for Python"

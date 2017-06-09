@@ -40,9 +40,6 @@ import os.path
 import errno
 import ephem
 import numpy as np
-import matplotlib as mpl
-mpl.use('TkAgg')  # Must happen before pyplot import!
-import matplotlib.pyplot as plt
 import zipfile
 import geocoder
 import warnings
@@ -54,6 +51,10 @@ try:
 except ImportError:
     import urllib2 # pylint: disable=unused-import
     from urllib2 import urlopen, Request
+import matplotlib as mpl
+mpl.use('TkAgg')  # Must happen before pyplot import!
+#mpl.use('WxAgg')  # Must happen before pyplot import!
+import matplotlib.pyplot as plt
 
 
 def mkdir_checked(path):
@@ -282,10 +283,7 @@ class SatDataViz(object):
         picked_sats = []
         plotted_sats = []
         last_picked = [None]  # Keep data mutable
-        data_ok = threading.Event()
-        data_ok.set()
-        click_ok = threading.Event()
-        click_ok.set()
+        update_lock = threading.Lock()
 
         def handle_close(event):
             # Any way to make this more useful?
@@ -295,13 +293,12 @@ class SatDataViz(object):
 
         def onpick(event):
             ''' These *only* happen with data points get clicked by any button '''
-            # print("Picked  at", time.time(), event.mouseevent)
+            #print("Picked  in", time.time(), event.mouseevent)
             last_picked[0] = event.mouseevent
             if time.time() - self.curr_time < self.click_wait_s:  # Rate limiting
                 return
             self.curr_time = time.time()
-            data_ok.wait()  # Pause while processing data
-            click_ok.clear()
+            update_lock.acquire(True)
             for plot_idx in event.ind:
                 satdata = plotted_sats[plot_idx]
                 # print(satdata['name'], "plot_idx=", satdata['plot_idx'])
@@ -312,7 +309,8 @@ class SatDataViz(object):
                 else:
                     satdata['picked'] = True
                     picked_sats.append(satdata)
-            click_ok.set()
+            update_lock.release()
+            #print("Picked  out", time.time(), event.mouseevent)
         fig.canvas.mpl_connect('pick_event', onpick)
 
         def onclick(event):
@@ -321,8 +319,7 @@ class SatDataViz(object):
             if time.time() - self.curr_time < self.click_wait_s:  # Rate limiting
                 return
             self.curr_time = time.time()
-            data_ok.wait()  # Pause while processing data
-            click_ok.clear()
+            update_lock.acquire(True)
             if last_picked[0] == event:
                 pass  # print("Part of last pick")
             else:
@@ -330,13 +327,12 @@ class SatDataViz(object):
                     for satdata in picked_sats[:]:
                         satdata['picked'] = False
                     del picked_sats[:]
-            click_ok.set()
+            update_lock.release()
         fig.canvas.mpl_connect('button_press_event', onclick)
 
         running = True
         while running:
-            click_ok.wait()  # Pause while processing a click
-            data_ok.clear()  # Don't let clicks use stale data
+            update_lock.acquire(True)
             if secs_per_step:
                 curr_date += timedelta(seconds=secs_per_step)
             else:
@@ -394,7 +390,7 @@ class SatDataViz(object):
             ax.set_rmax(1.0)
             self.notate_sat_data(ax=ax, noted_sats=picked_sats)
             plt.subplots_adjust(left=0.05, right=0.6)
-            data_ok.set()  # Done
+            update_lock.release()
             try:
                 plt.pause(update_pause_ms/1000.0)  # Required, but the loop is rather slow anyway
                 #fig.clf()

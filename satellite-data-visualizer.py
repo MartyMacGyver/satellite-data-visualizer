@@ -89,9 +89,12 @@ class SatDataViz(object):
         self.data_dir = "tledata"
         self.savedsats = None
         self.curr_time = None
+        self.curr_date = None
         self.home = None
-        self.latlng = None
+        self.latitude = None
+        self.longitude = None
         self.location = None
+        self.friendly_location = None
         self.elevation = None
         mkdir_checked(self.data_dir)
         # Config file defaults
@@ -117,7 +120,7 @@ class SatDataViz(object):
     def _load_config(self, config_file=None):
         if not config_file:
             config_file = self.config_file
-        self.config = ConfigObj(config_file)
+        self.config = ConfigObj(config_file, encoding='UTF8')
         self.secs_per_step = self._verify_config_item(
             self.secs_per_step, 'secs_per_step', int)
         self.default_location = self._verify_config_item(
@@ -138,11 +141,11 @@ class SatDataViz(object):
     def _verify_config_item(self, default, item_name, item_type):
         try:
             rval = item_type(self.config['main'][item_name])
-        except KeyError as e:
+        except KeyError:
             print("Config item '{:s}' not found, using default value ({})".format(
                 item_name, default))
             rval = self.config['main'][item_name] = default
-        except ValueError as e:
+        except ValueError:
             print("Config item '{:s}' malformed, using default value ({})".format(
                 item_name, default))
             rval = self.config['main'][item_name] = default
@@ -156,14 +159,13 @@ class SatDataViz(object):
 
     def readTLEfile(self, source):
         ''' Get and read a TLE file (unzip if necessary) '''
-        user_agent = self.config['main']['user_agent']
         source_name = source['name']
         source_file = os.path.join(self.data_dir, sanitize_filename(source['file']))
         source_url = source['url']
 
         print('Querying TLE data source \"{}\" at {}'.format(source_name, source_url))
         try:
-            req = Request(source_url, headers={'User-Agent': user_agent})
+            req = Request(source_url, headers={'User-Agent': self.user_agent})
             response = urlopen(req)
             headers = response.info()
             new_etag = dequote(headers["ETag"])
@@ -256,60 +258,103 @@ class SatDataViz(object):
                     i_name += 1
             print()
 
-    def get_location(self):
+    def _parse_coords(self, coords):
+        coord_parts = [s.strip() for s in coords.split(',')]
+        coord_parts_parsed = []
+        test_ephem = ephem.Observer()
+        if 2 <= len(coord_parts) <= 3:
+            for idx, part in enumerate(coord_parts):
+                try:
+                    if part[-1].upper() in list('SW'):
+                        part = '-' + part
+                    if idx == 0:
+                        test_ephem.lat = str(part) # pylint: disable=assigning-non-slot
+                    elif idx == 1:
+                        test_ephem.lon = str(part) # pylint: disable=assigning-non-slot
+                    elif idx == 2:
+                        test_ephem.elevation = float(part) # pylint: disable=assigning-non-slot
+                except ValueError:
+                    return None
+                coord_parts_parsed.append(part)
+        if len(coord_parts) == 2:
+            coord_parts_parsed.append(0.0) # Default elevation
+        return coord_parts_parsed
+
+    def get_location(self, given_location=None):
         ''' Get user location based on input '''
+        print('Location examples:')
+        print('    "San Francisco, CA, USA"')
+        print('    "37.7749295,  -122.4194155,  15.60"')
+        print('    "37:46:29.7N, -122:25:09.9E, 15.60"')
+        print('')
         if sys.version_info < (3,0):
             input_function = raw_input # pylint:disable=undefined-variable
         else:
             input_function = input
-        default_location = self.config['main']['default_location']
-        location_keyword = ''
-        while not location_keyword:
-            location_keyword = input_function(
-                'Enter location (default="{}"): '.format(default_location))
-            if not location_keyword or location_keyword.isspace():
-                location_keyword = default_location
-            gloc = geocoder.google(location_keyword)
-            if gloc.status != 'OK':
-                print('Location not found: "{}"'.format(location_keyword))
-                location_keyword = ''
-            else:
-                print()
-        #print()
-        #print(gloc.json)
-        #print()
-        self.location = gloc.address
-        self.config['main']['default_location'] = self.location
-        self.latlng = "{}, {}".format(gloc.lat, gloc.lng)
-        self.elevation = geocoder.elevation(gloc.latlng).meters
         self.home = ephem.Observer()
+        coords = None
+        while True:
+            if given_location:
+                print('Given location: "{}"'.format(given_location))
+                location_keyword = given_location
+                given_location = None
+            else:
+                location_keyword = input_function(
+                    'Enter location (default="{}"): '.format(
+                        self.default_location))
+            if not location_keyword or location_keyword.isspace():
+                location_keyword = self.default_location
+            coords = self._parse_coords(location_keyword)
+            if coords:
+                self.location = location_keyword
+                (self.latitude, self.longitude, self.elevation) = coords
+                self.elevation = float(self.elevation)
+                self.friendly_location = "coordinates"
+                break
+            else:
+                gloc = geocoder.google(location_keyword)
+                if gloc.status != 'OK':
+                    print('Location not found: "{}"'.format(location_keyword))
+                    location_keyword = None
+                else:
+                    self.location = gloc.address
+                    self.elevation = geocoder.elevation(gloc.latlng).meters
+                    (self.latitude, self.longitude) = gloc.latlng
+                    #(self.latitude, self.longitude) = (gloc.lat, gloc.lng)
+                    self.friendly_location = "{}".format(self.location)
+                    #print(gloc.json)
+                    print()
+                    break
+        self.config['main']['default_location'] = self.location
         self.home.elevation = self.elevation  # meters
-        (latitude, longitude) = gloc.latlng
-        self.home.lat = str(latitude)  # +N
-        self.home.lon = str(longitude)  # +E
-        print("Location: {} ({}) {}m".format(self.location, self.latlng, self.elevation))
-        print("Ephem: {}N {}E, {:0.2f}m".format(self.home.lat, self.home.lon, self.home.elevation))
+        self.home.lat = str(self.latitude)  # +N
+        self.home.lon = str(self.longitude)  # +E
+        print("Found: {}N, {}E, {:0.2f}m".format(
+            self.home.lat, self.home.lon, self.home.elevation))
+        self.friendly_location = "{} ({:4.7f}N, {:4.7f}E) {:0.2f}m".format(
+            self.friendly_location, 
+            self.home.lat / ephem.degree,
+            self.home.lon / ephem.degree,
+            self.home.elevation)
+        print("Location: {}".format(self.friendly_location))
         print()
 
     def plot_sats(self):
         warnings.filterwarnings("ignore",
             ".*Using default event loop until function specific to this GUI is implemented")
-        color_outline = self.config['main']['color_outline']
-        color_alpha = float(self.config['main']['color_alpha'])
-        update_pause_ms = int(self.config['main']['update_pause_ms'])
-        window_size = self.config['main']['window_size']
-        secs_per_step = int(self.config['main']['secs_per_step'])
         print('-'*79)
         print()
         self.plt.rcParams['toolbar'] = 'None'
         fig = self.plt.figure()
         DPI = fig.get_dpi()
-        fig.set_size_inches(int(window_size[0])/float(DPI), int(window_size[1])/float(DPI))
+        fig.set_size_inches(
+            int(self.window_size[0])/float(DPI),
+            int(self.window_size[1])/float(DPI))
         # mng = self.plt.get_current_fig_manager()
         # mng.resize(1600,900)
         fig.canvas.set_window_title(self.win_label)
         self.curr_time = time.time()
-        curr_date = datetime.utcnow()
+        self.curr_date = datetime.utcnow()
         errored_sats = set()
         picked_sats = []
         plotted_sats = []
@@ -369,11 +414,11 @@ class SatDataViz(object):
                 self.plt.close()
                 break
             update_lock.acquire(True)
-            if secs_per_step:
-                curr_date += timedelta(seconds=secs_per_step)
+            if self.secs_per_step:
+                self.curr_date += timedelta(seconds=self.secs_per_step)
             else:
-                curr_date = datetime.utcnow()
-            self.home.date = curr_date
+                self.curr_date = datetime.utcnow()
+            self.home.date = self.curr_date
             theta_plot = []
             radius_plot = []
             colors = []
@@ -414,10 +459,10 @@ class SatDataViz(object):
             # Note: you can't currently pass multiple marker styles in an array
             ax.scatter(theta_plot, radius_plot, marker=marker,
                        picker=1, # This sets the tolerance for clicking on a point
-                       c=colors, edgecolors=color_outline, alpha=color_alpha,
+                       c=colors, edgecolors=self.color_outline, alpha=self.color_alpha,
                       )
-            title_locn = "{} ({}) {}m".format(self.location, self.latlng, self.elevation)
-            title_date = "{} UTC".format(curr_date)
+            title_locn = self.friendly_location
+            title_date = "{} UTC".format(self.curr_date)
             title_stat = "Satellites overhead: {}".format(len(plotted_sats))
             ax.set_title('\n'.join([title_locn, title_date, title_stat]), va='bottom')
             ax.set_facecolor('ivory')
@@ -430,7 +475,7 @@ class SatDataViz(object):
             self.notate_sat_data(ax=ax, noted_sats=picked_sats)
             update_lock.release()
             try:
-                self.plt.pause(update_pause_ms/1000.0)
+                self.plt.pause(self.update_pause_ms/1000.0)
             except Exception as e:  # pylint: disable=broad-except
                 # Ignore this specific tkinter error on close (intrinsic to pyplot)
                 if not(repr(e).startswith("TclError") and
@@ -467,8 +512,12 @@ if __name__ == "__main__":
     print()
     print('-'*79)
 
+    given_location = None
+    if len(sys.argv) > 1:
+        given_location = sys.argv[1]
+
     sdv = SatDataViz()
-    sdv.get_location()
+    sdv.get_location(given_location=given_location)
     sdv.process_tle_data()
     sdv.save_config()
     sdv.plot_sats()

@@ -52,10 +52,6 @@ except ImportError:
     import urllib2 # pylint: disable=unused-import
     from urllib2 import urlopen, Request
 import matplotlib as mpl
-#mpl.use('TkAgg')  # Must happen before pyplot import!
-mpl.use('Qt5Agg')  # Must happen before pyplot import!
-#mpl.use('WxAgg')  # Must happen before pyplot import!
-import matplotlib.pyplot as plt
 
 
 def mkdir_checked(path):
@@ -97,25 +93,60 @@ class SatDataViz(object):
         self.latlng = None
         self.location = None
         self.elevation = None
+        mkdir_checked(self.data_dir)
+        # Config file defaults
+        self.secs_per_step = 0
+        self.default_location = "San Francisco, CA, USA"
+        self.color_outline = "#808080"
+        self.color_alpha = 0.75
+        self.user_agent = "Mozilla/5.0"
+        self.window_size = [1700, 1000]
+        self.update_pause_ms = 20
+        self.mpl_backend = 'TkAgg'
         if config_file:
             self.config_file = config_file
         else:
             self.config_file = 'config.ini'
-        mkdir_checked(self.data_dir)
-        self.load_config()
+        self._load_config()
+        print("Selected the '{}' backend for MatPlotLib".format(self.mpl_backend))
+        print()
+        mpl.use(self.mpl_backend)  # Must happen before pyplot import!
+        import matplotlib.pyplot
+        self.plt = matplotlib.pyplot
 
-    def load_config(self, config_file=None):
+    def _load_config(self, config_file=None):
         if not config_file:
             config_file = self.config_file
         self.config = ConfigObj(config_file)
-        #pprint(sdv.config)
-        # TODO: validate inputs to avoid possible crashes
-        #    self.config['main']['color_outline']
-        #    self.config['main']['color_alpha']
-        #    self.config['main']['update_pause_ms']
-        #    self.config['main']['window_size']
-        #    self.config['main']['user_agent']
-        #    self.config['main']['default_location']
+        self.secs_per_step = self._verify_config_item(
+            self.secs_per_step, 'secs_per_step', int)
+        self.default_location = self._verify_config_item(
+            self.default_location, 'default_location', str)
+        self.color_outline = self._verify_config_item(
+            self.color_outline, 'color_outline', str)
+        self.color_alpha = self._verify_config_item(
+            self.color_alpha, 'color_alpha', float)
+        self.user_agent = self._verify_config_item(
+            self.user_agent, 'user_agent', str)
+        self.window_size = self._verify_config_item(
+            self.window_size, 'window_size', list)
+        self.update_pause_ms = self._verify_config_item(
+            self.update_pause_ms, 'update_pause_ms', int)
+        self.mpl_backend = self._verify_config_item(
+            self.mpl_backend, 'mpl_backend', str)
+
+    def _verify_config_item(self, default, item_name, item_type):
+        try:
+            rval = item_type(self.config['main'][item_name])
+        except KeyError as e:
+            print("Config item '{:s}' not found, using default value ({})".format(
+                item_name, default))
+            rval = self.config['main'][item_name] = default
+        except ValueError as e:
+            print("Config item '{:s}' malformed, using default value ({})".format(
+                item_name, default))
+            rval = self.config['main'][item_name] = default
+        return rval
 
     def save_config(self, config_file=None):
         if config_file:
@@ -216,7 +247,8 @@ class SatDataViz(object):
                         if body_datapart in bodies_dedup:
                             sat_index = bodies_dedup[body_datapart]
                             self.savedsats[sat_index] = new_sat
-                            print("Updated idx {} for {}".format(sat_index, body_namepart))
+                            #print("Updated idx {} for '{}'".format(sat_index, body_namepart))
+                            print("Updated entry for '{}'".format(body_namepart))
                         else:
                             self.savedsats.append(new_sat)
                             sat_index = len(self.savedsats)-1
@@ -270,11 +302,11 @@ class SatDataViz(object):
         secs_per_step = int(self.config['main']['secs_per_step'])
         print('-'*79)
         print()
-        plt.rcParams['toolbar'] = 'None'
-        fig = plt.figure()
+        self.plt.rcParams['toolbar'] = 'None'
+        fig = self.plt.figure()
         DPI = fig.get_dpi()
         fig.set_size_inches(int(window_size[0])/float(DPI), int(window_size[1])/float(DPI))
-        # mng = plt.get_current_fig_manager()
+        # mng = self.plt.get_current_fig_manager()
         # mng.resize(1600,900)
         fig.canvas.set_window_title(self.win_label)
         self.curr_time = time.time()
@@ -334,8 +366,8 @@ class SatDataViz(object):
 
         while True:
             if close_event.is_set():
-                plt.close(fig)
-                plt.close()
+                self.plt.close(fig)
+                self.plt.close()
                 break
             update_lock.acquire(True)
             if secs_per_step:
@@ -375,10 +407,10 @@ class SatDataViz(object):
                         plotted_sats.append(satdata)
                         plot_idx += 1
             # plot initialization and display
-            plt.cla()
+            self.plt.cla()
             if not ax:
-                ax = plt.subplot(111, polar=True)
-                plt.subplots_adjust(left=0.05, right=0.6)
+                ax = self.plt.subplot(111, polar=True)
+                self.plt.subplots_adjust(left=0.05, right=0.6)
             marker = mpl.markers.MarkerStyle(marker='o', fillstyle='full')
             # Note: you can't currently pass multiple marker styles in an array
             ax.scatter(theta_plot, radius_plot, marker=marker,
@@ -399,7 +431,7 @@ class SatDataViz(object):
             self.notate_sat_data(ax=ax, noted_sats=picked_sats)
             update_lock.release()
             try:
-                plt.pause(update_pause_ms/1000.0)
+                self.plt.pause(update_pause_ms/1000.0)
             except Exception as e:  # pylint: disable=broad-except
                 # Ignore this specific tkinter error on close (intrinsic to pyplot)
                 if not(repr(e).startswith("TclError") and

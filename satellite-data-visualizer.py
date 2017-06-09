@@ -52,7 +52,8 @@ except ImportError:
     import urllib2 # pylint: disable=unused-import
     from urllib2 import urlopen, Request
 import matplotlib as mpl
-mpl.use('TkAgg')  # Must happen before pyplot import!
+#mpl.use('TkAgg')  # Must happen before pyplot import!
+mpl.use('Qt5Agg')  # Must happen before pyplot import!
 #mpl.use('WxAgg')  # Must happen before pyplot import!
 import matplotlib.pyplot as plt
 
@@ -270,7 +271,6 @@ class SatDataViz(object):
         print('-'*79)
         print()
         plt.rcParams['toolbar'] = 'None'
-        plt.ion()
         fig = plt.figure()
         DPI = fig.get_dpi()
         fig.set_size_inches(int(window_size[0])/float(DPI), int(window_size[1])/float(DPI))
@@ -284,11 +284,13 @@ class SatDataViz(object):
         plotted_sats = []
         last_picked = [None]  # Keep data mutable
         update_lock = threading.Lock()
+        close_event = threading.Event()
+        ax = None
 
         def handle_close(event):
-            # Any way to make this more useful?
             print()
             print("Event received ({:s})".format(event.name))
+            close_event.set()
         fig.canvas.mpl_connect('close_event', handle_close)
 
         def onpick(event):
@@ -330,8 +332,11 @@ class SatDataViz(object):
             update_lock.release()
         fig.canvas.mpl_connect('button_press_event', onclick)
 
-        running = True
-        while running:
+        while True:
+            if close_event.is_set():
+                plt.close(fig)
+                plt.close()
+                break
             update_lock.acquire(True)
             if secs_per_step:
                 curr_date += timedelta(seconds=secs_per_step)
@@ -370,36 +375,38 @@ class SatDataViz(object):
                         plotted_sats.append(satdata)
                         plot_idx += 1
             # plot initialization and display
-            ax = plt.subplot(111, polar=True)
-            title_locn = "{} ({}) {}m".format(self.location, self.latlng, self.elevation)
-            title_date = "{} UTC".format(curr_date)
-            title_stat = "Satellites overhead: {}".format(len(plotted_sats))
-            ax.set_title('\n'.join([title_locn, title_date, title_stat]), va='bottom')
-            ax.set_theta_offset(np.pi / 2.0)  # Top = 0 deg = North
-            ax.set_theta_direction(-1)  # clockwise
-            ax.xaxis.set_ticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
-            ax.yaxis.set_ticklabels([])  # hide radial tick labels
-            ax.grid(True)
-            ax.set_facecolor('ivory')
+            plt.cla()
+            if not ax:
+                ax = plt.subplot(111, polar=True)
+                plt.subplots_adjust(left=0.05, right=0.6)
             marker = mpl.markers.MarkerStyle(marker='o', fillstyle='full')
-            # Note: you can't currently pass multiple marker styles in an array like colors
+            # Note: you can't currently pass multiple marker styles in an array
             ax.scatter(theta_plot, radius_plot, marker=marker,
                        picker=1, # This sets the tolerance for clicking on a point
                        c=colors, edgecolors=color_outline, alpha=color_alpha,
                       )
+            title_locn = "{} ({}) {}m".format(self.location, self.latlng, self.elevation)
+            title_date = "{} UTC".format(curr_date)
+            title_stat = "Satellites overhead: {}".format(len(plotted_sats))
+            ax.set_title('\n'.join([title_locn, title_date, title_stat]), va='bottom')
+            ax.set_facecolor('ivory')
+            ax.set_theta_offset(np.pi / 2.0)  # Top = 0 deg = North
+            ax.set_theta_direction(-1)  # clockwise
             ax.set_rmax(1.0)
+            ax.grid(True)
+            ax.xaxis.set_ticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
+            ax.yaxis.set_ticklabels([])  # hide radial tick labels
             self.notate_sat_data(ax=ax, noted_sats=picked_sats)
-            plt.subplots_adjust(left=0.05, right=0.6)
             update_lock.release()
             try:
-                plt.pause(update_pause_ms/1000.0)  # Required, but the loop is rather slow anyway
-                #fig.clf()
-                plt.cla()
-            except Exception as e:
-                running = False
-                # TODO: Hiding a lot of Tk noise for now - improve this if possible
-                if not str(e).startswith("can't invoke \"update\" command:"):
-                    print(e)
+                plt.pause(update_pause_ms/1000.0)
+            except Exception as e:  # pylint: disable=broad-except
+                # Ignore this specific tkinter error on close (intrinsic to pyplot)
+                if not(repr(e).startswith("TclError") and
+                       str(e).startswith("can't invoke \"update\" command:")
+                      ):
+                    raise e
+                break
 
     def notate_sat_data(self, ax, noted_sats):
         notes = ["Tracking list:\n"]

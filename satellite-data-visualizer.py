@@ -61,6 +61,18 @@ def mkdir_checked(path):
         if exception.errno != errno.EEXIST:
             raise
 
+def unicode_deprecator(ustring):
+    ''' Force a Unicode string into an ASCII string if not using py3 '''
+    if sys.version_info < (3,0):
+        strategy = 'replace'  # 'replace', 'xmlcharrefreplace', 'ignore'
+        if type(ustring) == unicode: # pylint: disable=undefined-variable
+            import unicodedata
+            return unicodedata.normalize('NFKD', ustring).encode('ascii', strategy)
+        elif type(ustring) == str:
+            return ustring.decode('utf8').encode('ascii', strategy)
+    else:
+        return ustring
+
 def sanitize_filename(name):
     ok_chars = list(r"""._' ,;[](){}!@#%^&""")
     return "".join(c for c in name if c.isalnum() or c in ok_chars).rstrip()
@@ -282,7 +294,7 @@ class SatDataViz(object):
 
     def get_location(self, given_location=None):
         ''' Get user location based on input '''
-        print('Location examples:')
+        print('Location input examples:')
         print('    "San Francisco, CA, USA"')
         print('    "37.7749295,  -122.4194155,  15.60"')
         print('    "37:46:29.7N, -122:25:09.9E, 15.60"')
@@ -321,7 +333,8 @@ class SatDataViz(object):
                     self.elevation = geocoder.elevation(gloc.latlng).meters
                     (self.latitude, self.longitude) = gloc.latlng
                     #(self.latitude, self.longitude) = (gloc.lat, gloc.lng)
-                    self.friendly_location = "{}".format(self.location)
+                    self.friendly_location = u"{}".format(
+                        unicode_deprecator(self.location))
                     #print(gloc.json)
                     print()
                     break
@@ -462,7 +475,9 @@ class SatDataViz(object):
                        c=colors, edgecolors=self.color_outline, alpha=self.color_alpha,
                       )
             title_locn = self.friendly_location
-            title_date = "{} UTC".format(self.curr_date)
+            title_date = "{}.{:02d} UTC".format(
+                self.curr_date.strftime('%Y-%m-%d %H:%M:%S'),
+                int(round(self.curr_date.microsecond / 10000.0)))
             title_stat = "Satellites overhead: {}".format(len(plotted_sats))
             ax.set_title('\n'.join([title_locn, title_date, title_stat]), va='bottom')
             ax.set_facecolor('ivory')
@@ -512,12 +527,12 @@ if __name__ == "__main__":
     print()
     print('-'*79)
 
-    given_location = None
+    location_arg = None
     if len(sys.argv) > 1:
-        given_location = sys.argv[1]
+        location_arg = sys.argv[1]
 
     sdv = SatDataViz()
-    sdv.get_location(given_location=given_location)
+    sdv.get_location(given_location=location_arg)
     sdv.process_tle_data()
     sdv.save_config()
     sdv.plot_sats()

@@ -2,7 +2,7 @@
 
 A Python 3.4+ tool for visualizing satellite positions from using TLE (two-line element set) formatted data using matplotlib and your choice of graphical backends (Tcl/Tk by default).
 
-(I'm deprecating future support for Python 2.7 for this project.)
+While this currently works with Python 2.7, future support for this project with Python 2 is being deprecated.
 
 ![Sample screenshot](/docs/screenshot.jpg?raw=true)
 

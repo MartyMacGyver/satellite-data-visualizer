@@ -258,7 +258,6 @@ class SatDataViz(object):
 
     def get_location(self):
         ''' Get user location based on input '''
-        # Note: Pontianak, Indonesia and Quito, Ecuador are right on the equator
         if sys.version_info < (3,0):
             input_function = raw_input # pylint:disable=undefined-variable
         else:

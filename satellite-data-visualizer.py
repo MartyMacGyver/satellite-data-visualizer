@@ -174,8 +174,9 @@ class SatDataViz(object):
         source_name = source['name']
         source_file = os.path.join(self.data_dir, sanitize_filename(source['file']))
         source_url = source['url']
-
         print('Querying TLE data source \"{}\" at {}'.format(source_name, source_url))
+        fallback_mode = False
+        new_etag = ''
         try:
             req = Request(source_url, headers={'User-Agent': self.user_agent})
             response = urlopen(req)
@@ -184,16 +185,26 @@ class SatDataViz(object):
             new_size = int(headers["Content-Length"])
         except urllib.error.HTTPError as e:
             print("Error: Failed to query url ({})".format(e))
-
+            fallback_mode = True
+        except TimeoutError as e:
+            print("Error: Failed to query url ({})".format(e))
+            fallback_mode = True
+        except urllib.error.URLError as e:
+            print("Error: Failed to query url ({})".format(e))
+            fallback_mode = True
+        curr_size = 0
         if os.path.isfile(source_file):
             curr_size = os.path.getsize(source_file)
             curr_modtime = time.ctime(os.path.getmtime(source_file))
             print('Checking local TLE data {} ({}, {})'.format(
                   source_file, curr_size, curr_modtime))
         else:
-            curr_size = 0
-        if (curr_size == new_size) and (source['etag'] == new_etag):
-            print('Existing TLE data is current')
+            if fallback_mode:
+                print('Cannot access current or cached TLE data for this site, skipping')
+                return None
+        if fallback_mode or (
+                source['etag'] == new_etag and curr_size == new_size):
+            print('Using existing TLE data')
         else:
             print('Retrieving TLE data')
             try:

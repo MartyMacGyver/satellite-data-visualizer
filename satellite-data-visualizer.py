@@ -264,6 +264,10 @@ class SatDataViz(object):
                             'body': body,
                             'picked': False,
                         }
+                        # # Handling specially selected objects
+                        # if new_sat['name'] == 'TIANGONG 1':
+                        #     new_sat['color'] = '#FFFF00'
+                        #     print(new_sat)
                         if body_datapart in bodies_dedup:
                             sat_index = bodies_dedup[body_datapart]
                             self.savedsats[sat_index] = new_sat

@@ -4,7 +4,7 @@
     Satellite Data Visualizer for Python
     ---------------------------------------------------------------------------
 
-    Copyright (c) 2015-2017 Martin F. Falatic
+    Copyright (c) 2015-2018 Martin F. Falatic
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -29,8 +29,6 @@
 
 """
 
-from __future__ import print_function   # PEP 3105: Make print a function
-
 import math
 import time
 from datetime import datetime, timedelta
@@ -43,15 +41,21 @@ import numpy as np
 import zipfile
 import geocoder
 import warnings
+import getpass
 from configobj import ConfigObj
 import threading
 try:
     import urllib
     from urllib.request import urlopen, Request
 except ImportError:
-    import urllib2 # pylint: disable=unused-import
+    import urllib2  # noqa: disable=unused-import
     from urllib2 import urlopen, Request
 import matplotlib as mpl
+
+SECRET_API_KEY = ''
+RETRY_DELAY = 0.5
+MAX_RETRIES = 10
+DEFAULT_ELEVATION = 0.0
 
 
 def mkdir_checked(path):
@@ -61,21 +65,11 @@ def mkdir_checked(path):
         if exception.errno != errno.EEXIST:
             raise
 
-def unicode_deprecator(ustring):
-    ''' Force a Unicode string into an ASCII string if not using py3 '''
-    if sys.version_info < (3,0):
-        strategy = 'replace'  # 'replace', 'xmlcharrefreplace', 'ignore'
-        if type(ustring) == unicode: # pylint: disable=undefined-variable
-            import unicodedata
-            return unicodedata.normalize('NFKD', ustring).encode('ascii', strategy)
-        elif type(ustring) == str:
-            return ustring.decode('utf8').encode('ascii', strategy)
-    else:
-        return ustring
 
 def sanitize_filename(name):
     ok_chars = list(r"""._' ,;[](){}!@#%^&""")
     return "".join(c for c in name if c.isalnum() or c in ok_chars).rstrip()
+
 
 def dequote(s):
     """
@@ -166,7 +160,7 @@ class SatDataViz(object):
     def save_config(self, config_file=None):
         if config_file:
             self.config.filename = config_file
-        #self.config.unrepr = True
+        # self.config.unrepr = True
         self.config.write()
 
     def readTLEfile(self, source):
@@ -208,7 +202,7 @@ class SatDataViz(object):
         else:
             print('Retrieving TLE data')
             try:
-                data = response.read() 
+                data = response.read()
             except urllib.error.HTTPError as e:
                 print("Error: Failed to download data ({})".format(e))
                 print("Will use existing data if present")
@@ -260,23 +254,24 @@ class SatDataViz(object):
                         number = partsTLEdat1[1]
                         designator = partsTLEdat1[2]
                         (body_namepart, body_datapart) = body.writedb().split(',', 1)
-                        new_sat = {'name': body.name,
-                                   'number': number,
-                                   'designator': designator,
-                                   'source_num': source_section.split(' ', 1)[1],
-                                   'source_name': source['name'],
-                                   'color': source['color'],
-                                   'body': body,
-                                   'picked': False,
-                                  }
+                        new_sat = {
+                            'name': body.name,
+                            'number': number,
+                            'designator': designator,
+                            'source_num': source_section.split(' ', 1)[1],
+                            'source_name': source['name'],
+                            'color': source['color'],
+                            'body': body,
+                            'picked': False,
+                        }
                         if body_datapart in bodies_dedup:
                             sat_index = bodies_dedup[body_datapart]
                             self.savedsats[sat_index] = new_sat
-                            #print("Updated idx {} for '{}'".format(sat_index, body_namepart))
+                            # print("Updated idx {} for '{}'".format(sat_index, body_namepart))
                             print("Updated entry for '{}'".format(body_namepart))
                         else:
                             self.savedsats.append(new_sat)
-                            sat_index = len(self.savedsats)-1
+                            sat_index = len(self.savedsats) - 1
                             bodies_dedup[body_datapart] = sat_index
                     i_name += 1
             print()
@@ -291,16 +286,16 @@ class SatDataViz(object):
                     if part[-1].upper() in list('SW'):
                         part = '-' + part
                     if idx == 0:
-                        test_ephem.lat = str(part) # pylint: disable=assigning-non-slot
+                        test_ephem.lat = str(part)  # pylint: disable=assigning-non-slot
                     elif idx == 1:
-                        test_ephem.lon = str(part) # pylint: disable=assigning-non-slot
+                        test_ephem.lon = str(part)  # pylint: disable=assigning-non-slot
                     elif idx == 2:
-                        test_ephem.elevation = float(part) # pylint: disable=assigning-non-slot
+                        test_ephem.elevation = float(part)  # pylint: disable=assigning-non-slot
                 except ValueError:
                     return None
                 coord_parts_parsed.append(part)
         if len(coord_parts) == 2:
-            coord_parts_parsed.append(0.0) # Default elevation
+            coord_parts_parsed.append(0.0)  # Default elevation
         return coord_parts_parsed
 
     def get_location(self, given_location=None):
@@ -310,10 +305,7 @@ class SatDataViz(object):
         print('    "37.7749295,  -122.4194155,  15.60"')
         print('    "37:46:29.7N, -122:25:09.9E, 15.60"')
         print('')
-        if sys.version_info < (3,0):
-            input_function = raw_input # pylint:disable=undefined-variable
-        else:
-            input_function = input
+        input_function = input
         self.home = ephem.Observer()
         coords = None
         while True:
@@ -323,8 +315,7 @@ class SatDataViz(object):
                 given_location = None
             else:
                 location_keyword = input_function(
-                    'Enter location (default="{}"): '.format(
-                        self.default_location))
+                    'Enter location ["{}"]: '.format(self.default_location))
             if not location_keyword or location_keyword.isspace():
                 location_keyword = self.default_location
             coords = self._parse_coords(location_keyword)
@@ -335,28 +326,41 @@ class SatDataViz(object):
                 self.friendly_location = "coordinates"
                 break
             else:
-                gloc = geocoder.google(location_keyword)
+                gloc = geocoder.google(location_keyword, key=SECRET_API_KEY)
+                print(location_keyword, gloc.status)
                 if gloc.status != 'OK':
                     print('Location not found: "{}"'.format(location_keyword))
                     location_keyword = None
                 else:
                     self.location = gloc.address
-                    self.elevation = geocoder.elevation(gloc.latlng).meters
+                    if SECRET_API_KEY == '':
+                        print("No API key - using default elevation {}m".format(DEFAULT_ELEVATION))
+                        self.elevation = DEFAULT_ELEVATION
+                    else:
+                        for _ in range(MAX_RETRIES):
+                            self.elevation = geocoder.elevation(gloc.latlng, key=SECRET_API_KEY).meters
+                            if self.elevation is not None:
+                                break
+                            time.sleep(RETRY_DELAY)
+                        else:
+                            print("Retries exceeded - using default elevation {}m".format(DEFAULT_ELEVATION))
+                            self.elevation = DEFAULT_ELEVATION
+
                     (self.latitude, self.longitude) = gloc.latlng
-                    #(self.latitude, self.longitude) = (gloc.lat, gloc.lng)
-                    self.friendly_location = u"{}".format(
-                        unicode_deprecator(self.location))
-                    #print(gloc.json)
+                    # (self.latitude, self.longitude) = (gloc.lat, gloc.lng)
+                    self.friendly_location = u"{}".format(self.location)
+                    # print(gloc.json)
                     print()
                     break
         self.config['main']['default_location'] = self.location
+        print(self.elevation)
         self.home.elevation = self.elevation  # meters
         self.home.lat = str(self.latitude)  # +N
         self.home.lon = str(self.longitude)  # +E
         print("Found: {}N, {}E, {:0.2f}m".format(
             self.home.lat, self.home.lon, self.home.elevation))
         self.friendly_location = "{} ({:4.7f}N, {:4.7f}E) {:0.2f}m".format(
-            self.friendly_location, 
+            self.friendly_location,
             self.home.lat / ephem.degree,
             self.home.lon / ephem.degree,
             self.home.elevation)
@@ -364,16 +368,17 @@ class SatDataViz(object):
         print()
 
     def plot_sats(self):
-        warnings.filterwarnings("ignore",
+        warnings.filterwarnings(
+            "ignore",
             ".*Using default event loop until function specific to this GUI is implemented")
-        print('-'*79)
+        print('-' * 79)
         print()
         self.plt.rcParams['toolbar'] = 'None'
         fig = self.plt.figure()
         DPI = fig.get_dpi()
         fig.set_size_inches(
-            int(self.window_size[0])/float(DPI),
-            int(self.window_size[1])/float(DPI))
+            int(self.window_size[0]) / float(DPI),
+            int(self.window_size[1]) / float(DPI))
         # mng = self.plt.get_current_fig_manager()
         # mng.resize(1600,900)
         fig.canvas.set_window_title(self.win_label)
@@ -395,7 +400,7 @@ class SatDataViz(object):
 
         def onpick(event):
             ''' These *only* happen with data points get clicked by any button '''
-            #print("Picked  in", time.time(), event.mouseevent)
+            # print("Picked  in", time.time(), event.mouseevent)
             last_picked[0] = event.mouseevent
             if time.time() - self.curr_time < self.click_wait_s:  # Rate limiting
                 return
@@ -412,7 +417,7 @@ class SatDataViz(object):
                     satdata['picked'] = True
                     picked_sats.append(satdata)
             update_lock.release()
-            #print("Picked  out", time.time(), event.mouseevent)
+            # print("Picked  out", time.time(), event.mouseevent)
         fig.canvas.mpl_connect('pick_event', onpick)
 
         def onclick(event):
@@ -455,7 +460,7 @@ class SatDataViz(object):
                     satdata['body'].compute(self.home)
                     alt = satdata['body'].alt
                 except ValueError:
-                    #print("Date out of range")
+                    # print("Date out of range")
                     pass
                 except RuntimeError as e:
                     if satdata['name'] not in errored_sats:
@@ -475,16 +480,22 @@ class SatDataViz(object):
                         plotted_sats.append(satdata)
                         plot_idx += 1
             # plot initialization and display
-            self.plt.cla()
             if not ax:
                 ax = self.plt.subplot(111, polar=True)
                 self.plt.subplots_adjust(left=0.05, right=0.6)
+            ax.cla()  # a bit less heavy than self.plt.cla()?
+            #TODO: ax2 = self.plt.axes([0.81, 0.05, 0.1, 0.075])
+            #TODO: mpl.widgets.Button(ax2, "aButton")
+            # def submit(text):
+            #     print(text)
+            # text_box = mpl.widgets.TextBox(ax2, 'textbox', initial="some text")
+            # text_box.on_submit(submit)
             marker = mpl.markers.MarkerStyle(marker='o', fillstyle='full')
             # Note: you can't currently pass multiple marker styles in an array
             ax.scatter(theta_plot, radius_plot, marker=marker,
-                       picker=1, # This sets the tolerance for clicking on a point
+                       picker=1,  # This sets the tolerance for clicking on a point
                        c=colors, edgecolors=self.color_outline, alpha=self.color_alpha,
-                      )
+                       )
             title_locn = self.friendly_location
             title_date = "{}.{:02d} UTC".format(
                 self.curr_date.strftime('%Y-%m-%d %H:%M:%S'),
@@ -501,12 +512,12 @@ class SatDataViz(object):
             self.notate_sat_data(ax=ax, noted_sats=picked_sats)
             update_lock.release()
             try:
-                self.plt.pause(self.update_pause_ms/1000.0)
+                self.plt.pause(self.update_pause_ms / 1000.0)
             except Exception as e:  # pylint: disable=broad-except
                 # Ignore this specific tkinter error on close (intrinsic to pyplot)
                 if not(repr(e).startswith("TclError") and
                        str(e).startswith("can't invoke \"update\" command:")
-                      ):
+                       ):
                     raise e
                 break
 
@@ -523,26 +534,43 @@ class SatDataViz(object):
                     math.degrees(satdata['body'].az),
                     math.degrees(satdata['body'].ra),
                     math.degrees(satdata['body'].dec),
-            ))
+                )
+            )
         if len(notes) <= 1:
             notes.append("(none)")
         ax.annotate(
             '\n'.join(notes),
             xy=(0.0, 0.0),  # theta, radius
-            xytext=(math.pi/2.0, 1.25),    # fraction, fraction
+            xytext=(math.pi / 2.0, 1.25),    # fraction, fraction
             horizontalalignment='left',
             verticalalignment='center',
         )
 
+    def get_api_key(self):
+        global SECRET_API_KEY
+        if 'GOOGLE_API_KEY' in os.environ and os.environ['GOOGLE_API_KEY']:
+            print(os.environ['GOOGLE_API_KEY'])
+            SECRET_API_KEY = os.environ['GOOGLE_API_KEY']
+        else:
+            if SECRET_API_KEY == '':
+                default_text = '<not set>'
+            else:
+                default_text = '<secret>'
+            new_key = getpass.getpass("Enter Google Maps Geocoding API key [{}]: ".format(default_text))
+            if new_key != '':
+                SECRET_API_KEY = new_key
+
+
 if __name__ == "__main__":
     print()
-    print('-'*79)
+    print('-' * 79)
 
     location_arg = None
     if len(sys.argv) > 1:
         location_arg = sys.argv[1]
 
     sdv = SatDataViz()
+    sdv.get_api_key()
     sdv.get_location(given_location=location_arg)
     sdv.process_tle_data()
     sdv.save_config()

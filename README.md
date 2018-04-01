@@ -2,8 +2,6 @@
 
 A Python 3.4+ tool for visualizing satellite positions from using TLE (two-line element set) formatted data using matplotlib and your choice of graphical backends (Tcl/Tk by default).
 
-While this currently works with Python 2.7, future support for this project with Python 2 is being deprecated.
-
 ![Sample screenshot](/docs/screenshot.jpg?raw=true)
 
 More about TLE data at https://en.wikipedia.org/wiki/Two-line_element_set
@@ -14,7 +12,7 @@ Note: This is developed and tested using Python 3.6 on Windows and cross-tested 
 
 (See the installaton section for how to install)
 
-run: `satellite-data-visualizer.py` or `python3 satellite-data-visualizer.py`
+run: `satellite-data-visualizer.py`
 
 Enter a location (in quotes on the command line, or at the prompt):
   - H:M:S coordinates (specify N/S and E/W, or use -/+ degrees relative to N,E)
@@ -34,6 +32,10 @@ Interesting locations (elevations for coordinate pairs are up to the user):
   - "Pontianak, Indonesia" and "Quito, Ecuador" are places right on the equator
 
 ## Installation
+
+For elevation data, you'll need a Google API key from https://developers.google.com/maps/documentation/geocoding/get-api-key
+
+Set it in your environment (e.g., `export GOOGLE_API_KEY=[secret_key]` in Linux/OSX or `set GOOGLE_API_KEY=[secret_key]` in Windows) before running the app.
 
 This application initially uses the Tcl/Tk ('TkAgg') backend that's available on most systems by default, but I've successfully used the Qt5 ('Qt5Agg') and wxPython ('WxAgg') backends instead. You can change this in `config.ini`.
 

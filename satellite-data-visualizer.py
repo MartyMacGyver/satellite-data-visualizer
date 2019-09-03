@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 """
     Satellite Data Visualizer for Python
     ---------------------------------------------------------------------------
 
-    Copyright (c) 2015-2018 Martin F. Falatic
+    Copyright (c) 2015-2019 Martin F. Falatic
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -29,28 +29,26 @@
 
 """
 
+import errno
+import getpass
 import math
-import time
-from datetime import datetime, timedelta
-import sys
 import os
 import os.path
-import errno
-import ephem
-import numpy as np
-import zipfile
-import geocoder
-import warnings
-import getpass
-from configobj import ConfigObj
+import sys
 import threading
-try:
-    import urllib
-    from urllib.request import urlopen, Request
-except ImportError:
-    import urllib2  # noqa: disable=unused-import
-    from urllib2 import urlopen, Request
+import time
+import urllib
+import warnings
+import zipfile
+from datetime import datetime, timedelta
+from urllib.request import urlopen, Request
+
+from configobj import ConfigObj
+import ephem
+import geocoder
+import numpy as np
 import matplotlib as mpl
+import matplotlib.pyplot
 
 SECRET_API_KEY = ''
 RETRY_DELAY = 0.5
@@ -120,7 +118,6 @@ class SatDataViz(object):
         print("Selected the '{}' backend for MatPlotLib".format(self.mpl_backend))
         print()
         mpl.use(self.mpl_backend)  # Must happen before pyplot import!
-        import matplotlib.pyplot
         self.plt = matplotlib.pyplot
 
     def _load_config(self, config_file=None):
@@ -466,10 +463,11 @@ class SatDataViz(object):
                 except ValueError:
                     # print("Date out of range")
                     pass
-                except RuntimeError as e:
-                    if satdata['name'] not in errored_sats:
-                        errored_sats.add(satdata['name'])
-                        print("Cannot compute position for {}".format(satdata['name']))
+                except RuntimeError:
+                    if satdata['number'] not in errored_sats:
+                        errored_sats.add(satdata['number'])
+                        print("Cannot compute position for {} {} {} - has it deorbited?".format(
+                            satdata['name'], satdata['number'], satdata['designator']))
                 else:
                     if math.degrees(alt) > 0.0:
                         satdata['plot_idx'] = plot_idx
@@ -488,7 +486,7 @@ class SatDataViz(object):
                 ax = self.plt.subplot(111, polar=True)
                 self.plt.subplots_adjust(left=0.05, right=0.6)
             ax.cla()  # a bit less heavy than self.plt.cla()?
-            #TODO: ax2 = self.plt.axes([0.81, 0.05, 0.1, 0.075])
+            #TODO  ax2 = self.plt.axes([0.81, 0.05, 0.1, 0.075])
             #TODO: mpl.widgets.Button(ax2, "aButton")
             # def submit(text):
             #     print(text)
@@ -519,8 +517,8 @@ class SatDataViz(object):
                 self.plt.pause(self.update_pause_ms / 1000.0)
             except Exception as e:  # pylint: disable=broad-except
                 # Ignore this specific tkinter error on close (intrinsic to pyplot)
-                if not(repr(e).startswith("TclError") and
-                       str(e).startswith("can't invoke \"update\" command:")
+                if not(repr(e).startswith("TclError")
+                       and str(e).startswith("can't invoke \"update\" command:")  # noqa: W503
                        ):
                     raise e
                 break

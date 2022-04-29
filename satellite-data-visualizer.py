@@ -4,7 +4,7 @@
     Satellite Data Visualizer for Python
     ---------------------------------------------------------------------------
 
-    Copyright (c) 2015-2019 Martin F. Falatic
+    Copyright (c) 2015-2022 Martin F. Falatic
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -41,14 +41,14 @@ import urllib
 import warnings
 import zipfile
 from datetime import datetime, timedelta
-from urllib.request import urlopen, Request
+from urllib.request import Request, urlopen
 
-from configobj import ConfigObj
 import ephem
 import geocoder
-import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot
+import numpy as np
+from configobj import ConfigObj
 
 SECRET_API_KEY = ''
 RETRY_DELAY = 0.5
@@ -174,13 +174,7 @@ class SatDataViz(object):
             headers = response.info()
             new_etag = dequote(headers["ETag"])
             new_size = int(headers["Content-Length"])
-        except urllib.error.HTTPError as e:
-            print("Error: Failed to query url ({})".format(e))
-            fallback_mode = True
-        except TimeoutError as e:
-            print("Error: Failed to query url ({})".format(e))
-            fallback_mode = True
-        except urllib.error.URLError as e:
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
             print("Error: Failed to query url ({})".format(e))
             fallback_mode = True
         curr_size = 0
@@ -375,7 +369,7 @@ class SatDataViz(object):
         print('-' * 79)
         print()
         self.plt.rcParams['toolbar'] = 'None'
-        fig = self.plt.figure()
+        fig = self.plt.figure(1)
         DPI = fig.get_dpi()
         fig.set_size_inches(
             int(self.window_size[0]) / float(DPI),
@@ -486,12 +480,16 @@ class SatDataViz(object):
                 ax = self.plt.subplot(111, polar=True)
                 self.plt.subplots_adjust(left=0.05, right=0.6)
             ax.cla()  # a bit less heavy than self.plt.cla()?
-            #TODO  ax2 = self.plt.axes([0.81, 0.05, 0.1, 0.075])
-            #TODO: mpl.widgets.Button(ax2, "aButton")
+
+            # ax2 = self.plt.axes([0.1, 0.05, 0.5, 0.075])  #([0.81, 0.05, 0.1, 0.075])
+            # #mpl.widgets.Button(ax2, "aButton")
+
             # def submit(text):
             #     print(text)
+
             # text_box = mpl.widgets.TextBox(ax2, 'textbox', initial="some text")
             # text_box.on_submit(submit)
+
             marker = mpl.markers.MarkerStyle(marker='o', fillstyle='full')
             # Note: you can't currently pass multiple marker styles in an array
             ax.scatter(theta_plot, radius_plot, marker=marker,

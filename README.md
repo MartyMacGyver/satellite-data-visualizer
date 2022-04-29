@@ -52,10 +52,18 @@ Interesting locations (elevations for coordinate pairs are up to the user):
   - 00:00:00.0N, xxx:xx:xx.xE = Longitudes along the equator
   - "Pontianak, Indonesia" and "Quito, Ecuador" are places right on the equator
 
-## Credits:
+## Credits
 
 This project is a fork of the code provided on Reddit by /u/chknoodle_aggie in the thread https://www.reddit.com/r/Python/comments/3gwzjr/using_pyephem_i_just_plotted_every_tleinfo/
 
 This project also includes elements of the Python 3 port of this code by pklaus as published at https://gist.github.com/pklaus/469e603b105905170992
 
 Some TLE data is sourced from http://www.tle.info/ - this site appears to be IPv6-only now so if you have problems downloading from there be sure you are using an IPv6-capable connection.
+
+## TODO
+
+ - Add an input box!
+ - Make the list font smaller
+ - Exclude objects that have decayed by this time (https://celestrak.com/satcat/decayed.php)
+ - Show TLE epoch in list view (https://space.stackexchange.com/questions/13825/how-to-obtain-utc-of-the-epoch-time-in-a-satellite-tle-two-line-element)
+ - Add links in list view to https://www.n2yo.com or similar
